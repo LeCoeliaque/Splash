@@ -8,12 +8,14 @@ services:
       - key: SUPABASE_URL
         value: https://erspvsdfwaqjtuhymubj.supabase.co
       - key: SUPABASE_ANON_KEY
-        sync: false          # set manually in Render dashboard
+        sync: false
       - key: SECRET_KEY
-        generateValue: true  # Render auto-generates a secure random value
+        generateValue: true
       - key: LOCATION_ENDPOINT
         value: https://location.splashin.app/api/v4/on-location
       - key: DEVICE_UUID
         value: 7D53AF20-66A8-4F42-B422-0C7ED8939911
       - key: PYTHON_VERSION
         value: "3.11.0"
+      - key: FLASK_ENV
+        value: production
