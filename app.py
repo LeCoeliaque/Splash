@@ -313,37 +313,68 @@ def reregister_device(st: dict):
 def simplify_route(route, step=3):
     if not route:
         return route
-    return route[::step] + [route[-1]]
+    # Prevent over-decimating short routes — keep at least ~10 points
+    effective_step = max(1, min(step, len(route) // 10)) if len(route) > 10 else 1
+    simplified = route[::effective_step]
+    if simplified[-1] != route[-1]:
+        simplified.append(route[-1])
+    return simplified
+
+
+def straight_line_route(start_lat, start_lon, end_lat, end_lon, steps=20):
+    """Interpolate waypoints along a straight line as a last-resort fallback."""
+    return [
+        (
+            start_lat + (end_lat - start_lat) * i / steps,
+            start_lon + (end_lon - start_lon) * i / steps,
+        )
+        for i in range(steps + 1)
+    ]
 
 
 def get_route(start_lat, start_lon, end_lat, end_lon, mode="walking"):
     profile = "car" if mode == "driving" else "foot"
 
-    url = (
-        f"http://router.project-osrm.org/route/v1/{profile}/"
-        f"{start_lon},{start_lat};{end_lon},{end_lat}"
-        f"?overview=full&geometries=geojson"
-    )
+    # Two OSRM servers tried in order; second is a community fallback
+    servers = [
+        f"http://router.project-osrm.org/route/v1/{profile}",
+        f"https://routing.openstreetmap.de/routed-{profile}/route/v1/{profile}",
+    ]
 
-    try:
-        r = requests.get(url, timeout=10)
+    for base_url in servers:
+        url = (
+            f"{base_url}/{start_lon},{start_lat};{end_lon},{end_lat}"
+            f"?overview=full&geometries=geojson&steps=false"
+        )
+        try:
+            r = requests.get(url, timeout=8)
+            if r.status_code != 200:
+                print(f"OSRM HTTP {r.status_code} from {base_url}")
+                continue
 
-        print("OSRM status:", r.status_code)
-        print("OSRM response:", r.text[:500])  # 🔥 KEY
+            data = r.json()
+            if data.get("code") == "Ok":
+                coords = data["routes"][0]["geometry"]["coordinates"]
+                if not coords:
+                    print("OSRM returned empty coordinates")
+                    continue
+                route = [(c[1], c[0]) for c in coords]
+                print(f"✅ OSRM route: {len(route)} raw points via {base_url}")
+                return simplify_route(route, step=3)
+            else:
+                print(f"OSRM error: {data.get('code')} — {data.get('message', '')}")
 
-        data = r.json()
+        except requests.exceptions.Timeout:
+            print(f"⏱️ OSRM timeout: {base_url}")
+        except Exception as e:
+            print(f"❌ OSRM exception ({base_url}): {e}")
 
-        if data.get("code") == "Ok":
-            coords = data["routes"][0]["geometry"]["coordinates"]
-            route = [(c[1], c[0]) for c in coords]
-            return simplify_route(route, step=3)
-        else:
-            print("OSRM error:", data.get("code"), data)
-
-    except Exception as e:
-        print("OSRM exception:", e)
-
-    print("⚠️ Falling back to straight line")
+    # Straight-line fallback: scale point density to distance
+    dist = haversine_m(start_lat, start_lon, end_lat, end_lon)
+    steps = max(10, min(60, int(dist / 50)))  # ~1 waypoint per 50 m, capped at 60
+    route = straight_line_route(start_lat, start_lon, end_lat, end_lon, steps=steps)
+    print(f"⚠️ Straight-line fallback: {len(route)} pts over {dist:.0f}m")
+    return route
 
 # ============ LOCATION POST ============
 
@@ -709,7 +740,8 @@ def api_goto():
     st["route"] = route
     st["route_index"] = 0
     st["mode"] = mode
-    ulog(st, f"✅ Route loaded: {len(route)} waypoints")
+    source = "OSRM" if len(route) > 2 else "straight-line fallback"
+    ulog(st, f"✅ Route loaded ({source}): {len(route)} waypoints")
     return jsonify({"ok": True, "waypoints": len(route), "route": route})
 
 
