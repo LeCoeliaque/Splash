@@ -30,6 +30,7 @@ SUPABASE_URL   = os.environ.get("SUPABASE_URL", "https://erspvsdfwaqjtuhymubj.su
 ANON_KEY       = os.environ.get("SUPABASE_ANON_KEY", "")
 LOC_ENDPOINT   = os.environ.get("LOCATION_ENDPOINT", "https://location.splashin.app/api/v4/on-location")
 DEVICE_UUID    = os.environ.get("DEVICE_UUID", "7D53AF20-66A8-4F42-B422-0C7ED8939911")
+ORS_API_KEY = os.environ.get("ORS_API_KEY", "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImFhYzIyYjBlN2YyYzQ1MjZhZGY0M2E0NDIyODU1YTc1IiwiaCI6Im11cm11cjY0In0=")
 
 # Shared requests session — connection pooling, keep-alive, much faster than
 # creating a new connection on every post_location call.
@@ -247,6 +248,52 @@ def _reregister_device(st: dict):
         _log(st, f"❌ Device register error: {e}")
 
 # ============ ROUTING ============
+# ============ ROUTING ============
+
+ORS_PROFILES = {
+    "walking": "foot-walking",
+    "driving": "driving-car",
+}
+
+def _snap_to_road(lat: float, lon: float, mode: str = "walking") -> tuple[float, float]:
+    """Snap a coordinate to the nearest road using ORS or OSRM nearest endpoint."""
+    # Try ORS matrix/nearest via a zero-distance route to itself
+    if ORS_API_KEY:
+        try:
+            profile = ORS_PROFILES.get(mode, "foot-walking")
+            r = _http.post(
+                f"https://api.openrouteservice.org/v2/directions/{profile}/json",
+                headers={"Authorization": ORS_API_KEY},
+                json={"coordinates": [[lon, lat], [lon, lat]]},
+                timeout=6,
+            )
+            data = r.json()
+            # ORS returns snapped start point in bbox or waypoints
+            wp = (data.get("routes") or [{}])[0].get("way_points")
+            coords = (data.get("routes") or [{}])[0].get("geometry", {}).get("coordinates")
+            if coords:
+                snapped = coords[0]
+                return float(snapped[1]), float(snapped[0])
+        except Exception:
+            pass
+
+    # OSRM nearest fallback
+    profile = "car" if mode == "driving" else "foot"
+    for base in [
+        f"http://router.project-osrm.org/nearest/v1/{profile}",
+        f"https://routing.openstreetmap.de/routed-{profile}/nearest/v1/{profile}",
+    ]:
+        try:
+            r = _http.get(f"{base}/{lon},{lat}?number=1", timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                loc = data["waypoints"][0]["location"]
+                return float(loc[1]), float(loc[0])
+        except Exception:
+            pass
+
+    return lat, lon  # unchanged if all snapping fails
+
 
 def _straight_line(slat, slon, elat, elon, steps=20):
     return [
@@ -265,14 +312,49 @@ def _simplify(route, step=3):
     return simplified
 
 
-def get_route(slat, slon, elat, elon, mode="walking"):
-    profile = "car" if mode == "driving" else "foot"
-    servers = [
-        f"http://router.project-osrm.org/route/v1/{profile}",
-        f"https://routing.openstreetmap.de/routed-{profile}/route/v1/{profile}",
-    ]
-    for base in servers:
-        url = f"{base}/{slon},{slat};{elon},{elat}?overview=full&geometries=geojson&steps=false"
+def get_route(slat: float, slon: float, elat: float, elon: float, mode: str = "walking") -> list:
+    # Snap both endpoints to nearest road first
+    slat, slon = _snap_to_road(slat, slon, mode)
+    elat, elon = _snap_to_road(elat, elon, mode)
+
+    # 1. OpenRouteService (works from Render free tier, no IP blocking)
+    if ORS_API_KEY:
+        try:
+            profile = ORS_PROFILES.get(mode, "foot-walking")
+            r = _http.post(
+                f"https://api.openrouteservice.org/v2/directions/{profile}/geojson",
+                headers={"Authorization": ORS_API_KEY},
+                json={
+                    "coordinates": [[slon, slat], [elon, elat]],
+                    "instructions": False,
+                    "geometry_simplify": False,
+                },
+                timeout=10,
+            )
+            data = r.json()
+            features = data.get("features") or []
+            if features:
+                coords = features[0]["geometry"]["coordinates"]
+                if coords:
+                    route = [(c[1], c[0]) for c in coords]
+                    print(f"✅ ORS route: {len(route)} points ({mode})")
+                    return _simplify(route, step=2)
+            else:
+                err = data.get("error", {})
+                print(f"⚠️ ORS error: {err.get('message', data)}")
+        except Exception as e:
+            print(f"❌ ORS exception: {e}")
+
+    # 2. OSRM fallback (may be blocked on Render free tier but worth trying)
+    osrm_profile = "car" if mode == "driving" else "foot"
+    for base in [
+        f"http://router.project-osrm.org/route/v1/{osrm_profile}",
+        f"https://routing.openstreetmap.de/routed-{osrm_profile}/route/v1/{osrm_profile}",
+    ]:
+        url = (
+            f"{base}/{slon},{slat};{elon},{elat}"
+            f"?overview=full&geometries=geojson&steps=false"
+        )
         try:
             r = _http.get(url, timeout=8)
             if r.status_code != 200:
@@ -282,16 +364,18 @@ def get_route(slat, slon, elat, elon, mode="walking"):
                 coords = data["routes"][0]["geometry"]["coordinates"]
                 if coords:
                     route = [(c[1], c[0]) for c in coords]
+                    print(f"✅ OSRM route: {len(route)} points via {base}")
                     return _simplify(route, step=3)
         except requests.exceptions.Timeout:
             print(f"⏱️ OSRM timeout: {base}")
         except Exception as e:
-            print(f"❌ OSRM error ({base}): {e}")
+            print(f"❌ OSRM exception ({base}): {e}")
 
+    # 3. Straight-line last resort
     dist  = _haversine(slat, slon, elat, elon)
     steps = max(10, min(60, int(dist / 50)))
+    print(f"⚠️ Straight-line fallback over {dist:.0f}m")
     return _straight_line(slat, slon, elat, elon, steps)
-
 # ============ LOCATION POST ============
 
 def _post_location(st: dict):
