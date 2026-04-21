@@ -19,3 +19,5 @@ services:
         value: "3.11.0"
       - key: FLASK_ENV
         value: production
+      - key: ORS_API_KEY
+        sync: false  
