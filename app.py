@@ -318,31 +318,32 @@ def simplify_route(route, step=3):
 
 def get_route(start_lat, start_lon, end_lat, end_lon, mode="walking"):
     profile = "car" if mode == "driving" else "foot"
+
+    url = (
+        f"http://router.project-osrm.org/route/v1/{profile}/"
+        f"{start_lon},{start_lat};{end_lon},{end_lat}"
+        f"?overview=full&geometries=geojson"
+    )
+
     try:
-        url = (
-            f"http://router.project-osrm.org/route/v1/{profile}/"
-            f"{start_lon},{start_lat};{end_lon},{end_lat}"
-            f"?overview=simplified&geometries=geojson"
-        )
         r = requests.get(url, timeout=10)
+
+        print("OSRM status:", r.status_code)
+        print("OSRM response:", r.text[:500])  # 🔥 KEY
+
         data = r.json()
+
         if data.get("code") == "Ok":
             coords = data["routes"][0]["geometry"]["coordinates"]
             route = [(c[1], c[0]) for c in coords]
             return simplify_route(route, step=3)
-    except Exception as e:
-        pass
+        else:
+            print("OSRM error:", data.get("code"), data)
 
-    # fallback straight-line
-    steps = 30
-    route = [
-        (
-            start_lat + (end_lat - start_lat) * i / steps,
-            start_lon + (end_lon - start_lon) * i / steps,
-        )
-        for i in range(steps + 1)
-    ]
-    return simplify_route(route, step=4)
+    except Exception as e:
+        print("OSRM exception:", e)
+
+    print("⚠️ Falling back to straight line")
 
 # ============ LOCATION POST ============
 
