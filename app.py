@@ -471,7 +471,7 @@ def movement_loop(user_id: str):
             continue
 
         mode = MODES[st["mode"]]
-        route = st.get("route", [])
+        route = st.get("route") or []
 
         if not route or st.get("route_index", 0) >= len(route) - 1:
             st["mode"] = "still"
@@ -619,8 +619,8 @@ def api_state():
         "heading": round(st["heading"], 1),
         "battery": round(st["battery"], 3),
         "charging": st["charging"],
-        "route_progress": st["route_index"],
-        "route_total": len(st["route"]),
+        "route_total": len(st.get("route") or []),
+        "route_progress": min(st.get("route_index", 0), len(st.get("route") or [])),
         "status": st["status"],
         "log": st["log"][-50:],
         "near_home": near_home(st),
@@ -702,6 +702,10 @@ def api_goto():
         return jsonify({"ok": False, "error": "No current position"})
     ulog(st, f"🗺️ Routing {mode} to {dest_lat:.5f},{dest_lon:.5f}...")
     route = get_route(st["lat"], st["lon"], dest_lat, dest_lon, mode)
+
+    if not route:
+        route = []  
+    
     st["route"] = route
     st["route_index"] = 0
     st["mode"] = mode
