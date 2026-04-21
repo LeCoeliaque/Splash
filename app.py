@@ -3,6 +3,7 @@ import os
 import random
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
@@ -16,8 +17,6 @@ app.secret_key = os.environ.get("SECRET_KEY") or (_ for _ in ()).throw(
     RuntimeError("SECRET_KEY env var must be set")
 )
 
-# Lightweight signed-cookie sessions — no filesystem, no Flask-Session dependency,
-# survives Render spin-down/restarts as long as SECRET_KEY is stable.
 app.config.update(
     SESSION_COOKIE_NAME="ss_sid",
     SESSION_COOKIE_SAMESITE="Lax",
@@ -26,21 +25,23 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=86400 * 7,
 )
 
-SUPABASE_URL   = os.environ.get("SUPABASE_URL", "https://erspvsdfwaqjtuhymubj.supabase.co")
-ANON_KEY       = os.environ.get("SUPABASE_ANON_KEY", "")
-LOC_ENDPOINT   = os.environ.get("LOCATION_ENDPOINT", "https://location.splashin.app/api/v4/on-location")
-DEVICE_UUID    = os.environ.get("DEVICE_UUID", "7D53AF20-66A8-4F42-B422-0C7ED8939911")
-ORS_API_KEY = os.environ.get("ORS_API_KEY", "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImFhYzIyYjBlN2YyYzQ1MjZhZGY0M2E0NDIyODU1YTc1IiwiaCI6Im11cm11cjY0In0=")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://erspvsdfwaqjtuhymubj.supabase.co")
+ANON_KEY     = os.environ.get("SUPABASE_ANON_KEY", "")
+LOC_ENDPOINT = os.environ.get("LOCATION_ENDPOINT", "https://location.splashin.app/api/v4/on-location")
+DEVICE_UUID  = os.environ.get("DEVICE_UUID", "7D53AF20-66A8-4F42-B422-0C7ED8939911")
+ORS_API_KEY  = os.environ.get("ORS_API_KEY", "")
 
-# Shared requests session — connection pooling, keep-alive, much faster than
-# creating a new connection on every post_location call.
+# Shared HTTP session — connection pooling / keep-alive
 _http = requests.Session()
 _http.headers.update({"Content-Type": "application/json"})
+
+# Thread pool for non-blocking route calculations (never blocks Flask workers)
+_route_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="route")
 
 # ============ PER-USER STATE ============
 
 _user_states: dict[str, dict] = {}
-_states_lock  = threading.Lock()
+_states_lock = threading.Lock()
 
 MODES = {
     "walking": {"speed_ms": 1.4,  "variance": 0.4, "activity": "walking",    "accuracy": 8.0,  "jitter_m": 2.5, "post_interval": 5},
@@ -67,6 +68,10 @@ def _make_state() -> dict:
         "saved_locations": {"home": {"lat": 0.0, "lon": 0.0, "name": "Home"}},
         "home_location": "home",
         "home_radius_m": 200,
+        # routing status — polled by frontend to show live progress
+        "route_status":     "idle",   # idle | calculating | ready | error
+        "route_status_msg": "",
+        "route_pending":    None,     # holds route until frontend acks it
         # internal
         "_thread": None,
         "_last_activity": time.monotonic(),
@@ -87,7 +92,7 @@ def _remove_state(user_id: str):
     with _states_lock:
         st = _user_states.pop(user_id, None)
     if st:
-        st["_stop"] = True   # signals the thread to exit cleanly
+        st["_stop"] = True
 
 
 def _current_uid() -> str | None:
@@ -101,10 +106,9 @@ def _require_state():
 # ============ HELPERS ============
 
 def _log(st: dict, msg: str):
-    ts = datetime.now().strftime("%H:%M:%S")
+    ts  = datetime.now().strftime("%H:%M:%S")
     log = st["log"]
     log.append(f"[{ts}] {msg}")
-    # Trim in-place — avoids creating a new list object every time
     if len(log) > 150:
         del log[:50]
 
@@ -123,10 +127,10 @@ def _haversine(lat1, lon1, lat2, lon2) -> float:
 
 
 def _bearing(lat1, lon1, lat2, lon2) -> float:
-    p = math.pi / 180
+    p    = math.pi / 180
     dlon = (lon2 - lon1) * p
-    x = math.sin(dlon) * math.cos(lat2 * p)
-    y = math.cos(lat1 * p) * math.sin(lat2 * p) - math.sin(lat1 * p) * math.cos(lat2 * p) * math.cos(dlon)
+    x    = math.sin(dlon) * math.cos(lat2 * p)
+    y    = math.cos(lat1 * p) * math.sin(lat2 * p) - math.sin(lat1 * p) * math.cos(lat2 * p) * math.cos(dlon)
     return (math.degrees(math.atan2(x, y)) + 360) % 360
 
 
@@ -213,7 +217,7 @@ def _refresh_location_token(st: dict) -> bool:
             timeout=10,
         )
         data = r.json()
-        jwt = data.get("token") or data.get("jwt") or data.get("access_token") or data.get("locationToken")
+        jwt     = data.get("token") or data.get("jwt") or data.get("access_token") or data.get("locationToken")
         new_rft = data.get("refresh_token") or data.get("refreshToken") or data.get("locationRefreshToken")
         if jwt:
             st["location_jwt"] = jwt
@@ -221,7 +225,7 @@ def _refresh_location_token(st: dict) -> bool:
                 st["location_refresh_token"] = new_rft
             _log(st, "🔄 Location token refreshed")
             return True
-        _log(st, f"⚠️ Location token refresh failed — re-issuing")
+        _log(st, "⚠️ Location token refresh failed — re-issuing")
     except Exception as e:
         _log(st, f"❌ Location token refresh error: {e} — re-issuing")
     return _issue_location_token(st)
@@ -248,51 +252,8 @@ def _reregister_device(st: dict):
         _log(st, f"❌ Device register error: {e}")
 
 # ============ ROUTING ============
-# ============ ROUTING ============
 
-ORS_PROFILES = {
-    "walking": "foot-walking",
-    "driving": "driving-car",
-}
-
-def _snap_to_road(lat: float, lon: float, mode: str = "walking") -> tuple[float, float]:
-    """Snap a coordinate to the nearest road using ORS or OSRM nearest endpoint."""
-    # Try ORS matrix/nearest via a zero-distance route to itself
-    if ORS_API_KEY:
-        try:
-            profile = ORS_PROFILES.get(mode, "foot-walking")
-            r = _http.post(
-                f"https://api.openrouteservice.org/v2/directions/{profile}/json",
-                headers={"Authorization": ORS_API_KEY},
-                json={"coordinates": [[lon, lat], [lon, lat]]},
-                timeout=6,
-            )
-            data = r.json()
-            # ORS returns snapped start point in bbox or waypoints
-            wp = (data.get("routes") or [{}])[0].get("way_points")
-            coords = (data.get("routes") or [{}])[0].get("geometry", {}).get("coordinates")
-            if coords:
-                snapped = coords[0]
-                return float(snapped[1]), float(snapped[0])
-        except Exception:
-            pass
-
-    # OSRM nearest fallback
-    profile = "car" if mode == "driving" else "foot"
-    for base in [
-        f"http://router.project-osrm.org/nearest/v1/{profile}",
-        f"https://routing.openstreetmap.de/routed-{profile}/nearest/v1/{profile}",
-    ]:
-        try:
-            r = _http.get(f"{base}/{lon},{lat}?number=1", timeout=5)
-            if r.status_code == 200:
-                data = r.json()
-                loc = data["waypoints"][0]["location"]
-                return float(loc[1]), float(loc[0])
-        except Exception:
-            pass
-
-    return lat, lon  # unchanged if all snapping fails
+ORS_PROFILES = {"walking": "foot-walking", "driving": "driving-car"}
 
 
 def _straight_line(slat, slon, elat, elon, steps=20):
@@ -312,70 +273,75 @@ def _simplify(route, step=3):
     return simplified
 
 
-def get_route(slat: float, slon: float, elat: float, elon: float, mode: str = "walking") -> list:
-    # Snap both endpoints to nearest road first
-    slat, slon = _snap_to_road(slat, slon, mode)
-    elat, elon = _snap_to_road(elat, elon, mode)
+def _get_route_sync(slat, slon, elat, elon, mode) -> tuple[list, str]:
+    """Blocking route fetch — always called from thread pool, never from Flask."""
 
-    # 1. OpenRouteService (works from Render free tier, no IP blocking)
+    # 1. OpenRouteService
     if ORS_API_KEY:
         try:
-            profile = ORS_PROFILES.get(mode, "foot-walking")
             r = _http.post(
-                f"https://api.openrouteservice.org/v2/directions/{profile}/geojson",
+                f"https://api.openrouteservice.org/v2/directions/{ORS_PROFILES.get(mode,'foot-walking')}/geojson",
                 headers={"Authorization": ORS_API_KEY},
-                json={
-                    "coordinates": [[slon, slat], [elon, elat]],
-                    "instructions": False,
-                    "geometry_simplify": False,
-                },
+                json={"coordinates": [[slon, slat], [elon, elat]],
+                      "instructions": False, "geometry_simplify": False},
                 timeout=10,
             )
-            data = r.json()
-            features = data.get("features") or []
+            features = (r.json().get("features") or [])
             if features:
                 coords = features[0]["geometry"]["coordinates"]
                 if coords:
-                    route = [(c[1], c[0]) for c in coords]
-                    print(f"✅ ORS route: {len(route)} points ({mode})")
-                    return _simplify(route, step=2)
-            else:
-                err = data.get("error", {})
-                print(f"⚠️ ORS error: {err.get('message', data)}")
+                    return _simplify([(c[1], c[0]) for c in coords], step=2), "ORS"
         except Exception as e:
-            print(f"❌ ORS exception: {e}")
+            print(f"❌ ORS: {e}")
 
-    # 2. OSRM fallback (may be blocked on Render free tier but worth trying)
-    osrm_profile = "car" if mode == "driving" else "foot"
+    # 2. OSRM (two mirrors)
+    op = "car" if mode == "driving" else "foot"
     for base in [
-        f"http://router.project-osrm.org/route/v1/{osrm_profile}",
-        f"https://routing.openstreetmap.de/routed-{osrm_profile}/route/v1/{osrm_profile}",
+        f"http://router.project-osrm.org/route/v1/{op}",
+        f"https://routing.openstreetmap.de/routed-{op}/route/v1/{op}",
     ]:
-        url = (
-            f"{base}/{slon},{slat};{elon},{elat}"
-            f"?overview=full&geometries=geojson&steps=false"
-        )
         try:
-            r = _http.get(url, timeout=8)
-            if r.status_code != 200:
-                continue
-            data = r.json()
-            if data.get("code") == "Ok":
-                coords = data["routes"][0]["geometry"]["coordinates"]
-                if coords:
-                    route = [(c[1], c[0]) for c in coords]
-                    print(f"✅ OSRM route: {len(route)} points via {base}")
-                    return _simplify(route, step=3)
+            r = _http.get(
+                f"{base}/{slon},{slat};{elon},{elat}?overview=full&geometries=geojson&steps=false",
+                timeout=8,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("code") == "Ok":
+                    coords = data["routes"][0]["geometry"]["coordinates"]
+                    if coords:
+                        return _simplify([(c[1], c[0]) for c in coords], step=3), "OSRM"
         except requests.exceptions.Timeout:
             print(f"⏱️ OSRM timeout: {base}")
         except Exception as e:
-            print(f"❌ OSRM exception ({base}): {e}")
+            print(f"❌ OSRM {base}: {e}")
 
     # 3. Straight-line last resort
     dist  = _haversine(slat, slon, elat, elon)
     steps = max(10, min(60, int(dist / 50)))
-    print(f"⚠️ Straight-line fallback over {dist:.0f}m")
-    return _straight_line(slat, slon, elat, elon, steps)
+    return _straight_line(slat, slon, elat, elon, steps), "straight-line"
+
+
+def _calc_route_bg(user_id: str, slat, slon, elat, elon, mode: str):
+    """Runs in thread pool — writes result straight into user state."""
+    with _states_lock:
+        st = _user_states.get(user_id)
+    if not st:
+        return
+    try:
+        route, source = _get_route_sync(slat, slon, elat, elon, mode)
+        st["route"]           = route
+        st["route_index"]     = 0
+        st["mode"]            = mode
+        st["route_pending"]   = route          # frontend draws this on next poll
+        st["route_status"]     = "ready"
+        st["route_status_msg"] = f"{source} · {len(route)} pts"
+        _log(st, f"✅ Route ready ({source}): {len(route)} waypoints")
+    except Exception as e:
+        st["route_status"]     = "error"
+        st["route_status_msg"] = str(e)
+        _log(st, f"❌ Route error: {e}")
+
 # ============ LOCATION POST ============
 
 def _post_location(st: dict):
@@ -388,23 +354,23 @@ def _post_location(st: dict):
         j_lat, j_lon = _jitter(st["lat"], st["lon"], MODES[st["mode"]]["jitter_m"])
         now = _now_iso()
         payload = {
-            "user_id":            st["user_id"],
-            "latitude":           round(j_lat, 7),
-            "longitude":          round(j_lon, 7),
-            "accuracy":           MODES[st["mode"]]["accuracy"] + random.uniform(-0.5, 0.5),
-            "speed":              round(st["speed"], 2),
-            "heading":            round(st["heading"], 1),
-            "is_moving":          st["speed"] > 0.3,
-            "activity":           MODES[st["mode"]]["activity"],
-            "activity_confidence":random.randint(85, 100),
-            "battery_level":      round(st["battery"], 3),
-            "battery_is_charging":st["charging"],
-            "location_updated_at":now,
-            "last_updated_at":    now,
-            "activity_updated_at":now,
-            "uuid":               DEVICE_UUID,
-            "heartbeat_at":       now,
-            "cu":                 True,
+            "user_id":             st["user_id"],
+            "latitude":            round(j_lat, 7),
+            "longitude":           round(j_lon, 7),
+            "accuracy":            MODES[st["mode"]]["accuracy"] + random.uniform(-0.5, 0.5),
+            "speed":               round(st["speed"], 2),
+            "heading":             round(st["heading"], 1),
+            "is_moving":           st["speed"] > 0.3,
+            "activity":            MODES[st["mode"]]["activity"],
+            "activity_confidence": random.randint(85, 100),
+            "battery_level":       round(st["battery"], 3),
+            "battery_is_charging": st["charging"],
+            "location_updated_at": now,
+            "last_updated_at":     now,
+            "activity_updated_at": now,
+            "uuid":                DEVICE_UUID,
+            "heartbeat_at":        now,
+            "cu":                  True,
         }
         r = _http.post(LOC_ENDPOINT, json=payload,
                        headers={"Authorization": f"Bearer {jwt}"}, timeout=10)
@@ -415,24 +381,22 @@ def _post_location(st: dict):
 
 # ============ MOVEMENT LOOP ============
 
-# Intervals in seconds
-_TOKEN_REFRESH_S    = 3300   # 55 min — Supabase token
-_LOC_TOKEN_REFRESH_S= 3000   # 50 min — location JWT
-_DEVICE_REGISTER_S  = 120
-_IDLE_PAUSE_S       = 1800   # 30 min idle → pause movement (thread stays alive)
-_SMOOTHING          = 0.15
-_TIME_SCALE         = 0.6
+_TOKEN_REFRESH_S     = 3300
+_LOC_TOKEN_REFRESH_S = 3000
+_DEVICE_REGISTER_S   = 120
+_IDLE_PAUSE_S        = 1800
+_SMOOTHING           = 0.15
+_TIME_SCALE          = 0.6
 
 
 def _movement_loop(user_id: str, st: dict):
-    last_token_refresh    = time.monotonic()
-    last_loc_token_refresh= time.monotonic()
-    last_device_register  = time.monotonic()
+    last_token_refresh     = time.monotonic()
+    last_loc_token_refresh = time.monotonic()
+    last_device_register   = time.monotonic()
 
     while not st["_stop"]:
         now = time.monotonic()
 
-        # ---- maintenance tasks (only when active) ----
         if now - last_token_refresh >= _TOKEN_REFRESH_S:
             if _refresh_supabase_token(st):
                 _issue_location_token(st)
@@ -447,9 +411,7 @@ def _movement_loop(user_id: str, st: dict):
             _reregister_device(st)
             last_device_register = now
 
-        # ---- idle check ----
-        idle_secs = now - st["_last_activity"]
-        if idle_secs > _IDLE_PAUSE_S:
+        if time.monotonic() - st["_last_activity"] > _IDLE_PAUSE_S:
             if st["spoofing"]:
                 st["spoofing"] = False
                 _log(st, "💤 Idle — spoofing paused")
@@ -463,12 +425,9 @@ def _movement_loop(user_id: str, st: dict):
         mode  = MODES[st["mode"]]
         route = st["route"]
 
-        # ---- route finished → still ----
         if not route or st["route_index"] >= len(route) - 1:
             if st["mode"] != "still":
-                st["mode"]  = "still"
-                st["speed"] = 0.0
-                st["velocity"] = 0.0
+                st["mode"] = "still"; st["speed"] = 0.0; st["velocity"] = 0.0
             if time.time() - st["last_post"] >= 8:
                 _post_location(st)
                 st["last_post"] = time.time()
@@ -477,42 +436,36 @@ def _movement_loop(user_id: str, st: dict):
             time.sleep(1)
             continue
 
-        # ---- speed model ----
-        target = max(0.0, mode["speed_ms"] + random.uniform(-mode["variance"], mode["variance"]))
+        target     = max(0.0, mode["speed_ms"] + random.uniform(-mode["variance"], mode["variance"]))
         st["velocity"] = st["velocity"] * (1 - _SMOOTHING) + target * _SMOOTHING
         st["speed"]    = st["velocity"]
 
-        dist_left = st["velocity"] * _TIME_SCALE
+        dist_left      = st["velocity"] * _TIME_SCALE
         cur_lat, cur_lon = st["lat"], st["lon"]
-        moved = False
+        moved          = False
 
         while dist_left > 0.5 and st["route_index"] < len(route) - 1:
             nxt = route[st["route_index"] + 1]
             seg = _haversine(cur_lat, cur_lon, nxt[0], nxt[1])
             if seg <= dist_left:
-                dist_left -= seg
-                st["route_index"] += 1
-                cur_lat, cur_lon = nxt
-                moved = True
+                dist_left -= seg; st["route_index"] += 1
+                cur_lat, cur_lon = nxt; moved = True
             else:
                 frac = dist_left / seg
                 hdg  = _bearing(cur_lat, cur_lon, nxt[0], nxt[1])
                 st["heading"] += (hdg - st["heading"]) * 0.2
                 cur_lat += (nxt[0] - cur_lat) * frac
                 cur_lon += (nxt[1] - cur_lon) * frac
-                moved     = True
-                dist_left = 0
+                moved = True; dist_left = 0
 
-        # lane drift
         cur_lat += random.uniform(-0.000002, 0.000002)
         cur_lon += random.uniform(-0.000002, 0.000002)
         st["lat"], st["lon"] = cur_lat, cur_lon
 
         if moved:
-            last_ll = st["last_lat"]
-            far_enough = (last_ll is None or
-                          _haversine(cur_lat, cur_lon, last_ll, st["last_lon"]) > 2.0)
-            if far_enough and time.time() - st["last_post"] >= mode["post_interval"]:
+            ll = st["last_lat"]
+            if (ll is None or _haversine(cur_lat, cur_lon, ll, st["last_lon"]) > 2.0) \
+                    and time.time() - st["last_post"] >= mode["post_interval"]:
                 _post_location(st)
                 st["last_post"] = time.time()
                 st["last_lat"]  = cur_lat
@@ -526,14 +479,14 @@ def _ensure_thread(user_id: str):
     t  = st.get("_thread")
     if t is None or not t.is_alive():
         st["_stop"] = False
-        t = threading.Thread(target=_movement_loop, args=(user_id, st), daemon=True, name=f"mv-{user_id[:8]}")
+        t = threading.Thread(target=_movement_loop, args=(user_id, st),
+                             daemon=True, name=f"mv-{user_id[:8]}")
         t.start()
         st["_thread"] = t
 
 # ============ SEED LOCATION ============
 
 def _seed_location(st: dict) -> bool:
-    # Try Supabase first
     try:
         r = _http.get(
             f"{SUPABASE_URL}/rest/v1/user_location"
@@ -551,10 +504,8 @@ def _seed_location(st: dict) -> bool:
             return True
     except Exception as e:
         _log(st, f"⚠️ Supabase seed failed: {e}")
-
-    # IP fallback
     try:
-        r = _http.get("https://ipapi.co/json/", timeout=5)
+        r    = _http.get("https://ipapi.co/json/", timeout=5)
         data = r.json()
         st["lat"] = float(data.get("latitude", 0.0))
         st["lon"] = float(data.get("longitude", 0.0))
@@ -562,24 +513,23 @@ def _seed_location(st: dict) -> bool:
         return True
     except Exception as e:
         _log(st, f"❌ IP seed failed: {e}")
-
     return False
 
-# ============ CLEANUP (single background thread) ============
+# ============ CLEANUP ============
 
 def _cleanup_loop():
     while True:
-        time.sleep(300)   # check every 5 min instead of 10
+        time.sleep(300)
         cutoff = time.monotonic() - 7200
         with _states_lock:
             stale = [uid for uid, s in _user_states.items()
                      if s.get("_last_activity", 0) < cutoff]
         for uid in stale:
-            _remove_state(uid)   # also signals thread to stop
+            _remove_state(uid)
 
 threading.Thread(target=_cleanup_loop, daemon=True, name="cleanup").start()
 
-# ============ ROUTES ============
+# ============ FLASK ROUTES ============
 
 @app.route("/")
 def index():
@@ -591,23 +541,30 @@ def api_state():
     uid = _current_uid()
     if not uid:
         return jsonify({"logged_in": False})
-    st = _get_state(uid)
+    st    = _get_state(uid)
     route = st.get("route") or []
+
+    # Send pending route once, then clear it
+    pending = st.pop("route_pending", None)
+
     return jsonify({
-        "logged_in":     True,
-        "spoofing":      st["spoofing"],
-        "lat":           st["lat"],
-        "lon":           st["lon"],
-        "mode":          st["mode"],
-        "speed":         round(st["speed"], 2),
-        "heading":       round(st["heading"], 1),
-        "battery":       round(st["battery"], 3),
-        "charging":      st["charging"],
-        "route_total":   len(route),
-        "route_progress":min(st["route_index"], len(route)),
-        "log":           st["log"][-50:],
-        "near_home":     _near_home(st),
-        "saved_locations":st["saved_locations"],
+        "logged_in":        True,
+        "spoofing":         st["spoofing"],
+        "lat":              st["lat"],
+        "lon":              st["lon"],
+        "mode":             st["mode"],
+        "speed":            round(st["speed"], 2),
+        "heading":          round(st["heading"], 1),
+        "battery":          round(st["battery"], 3),
+        "charging":         st["charging"],
+        "route_total":      len(route),
+        "route_progress":   min(st["route_index"], len(route)),
+        "log":              st["log"][-50:],
+        "near_home":        _near_home(st),
+        "saved_locations":  st["saved_locations"],
+        "route_status":     st.get("route_status", "idle"),
+        "route_status_msg": st.get("route_status_msg", ""),
+        "route":            pending,   # only non-null when a fresh route just arrived
     })
 
 
@@ -629,8 +586,8 @@ def api_login():
 
         user_id = data["user"]["id"]
         session.clear()
-        session["uid"] = user_id
-        session.permanent = True
+        session["uid"]     = user_id
+        session.permanent  = True
 
         st = _get_state(user_id)
         st["access_token"]  = data["access_token"]
@@ -671,6 +628,11 @@ def api_toggle():
 
 @app.route("/api/goto", methods=["POST"])
 def api_goto():
+    """
+    Returns immediately with {ok, status:"calculating"}.
+    Route calculated in background thread pool.
+    Frontend polls /api/state for route_status == "ready" | "error".
+    """
     st = _require_state()
     if not st:
         return jsonify({"error": "not logged in"}), 401
@@ -686,14 +648,14 @@ def api_goto():
     if st["lat"] is None:
         return jsonify({"ok": False, "error": "No current position"})
 
-    _log(st, f"🗺️ Routing ({mode}) → {dest_lat:.5f},{dest_lon:.5f}…")
-    route = get_route(st["lat"], st["lon"], dest_lat, dest_lon, mode)
-    st["route"]       = route
-    st["route_index"] = 0
-    st["mode"]        = mode
-    source = "OSRM" if len(route) > 2 else "straight-line"
-    _log(st, f"✅ Route ready ({source}): {len(route)} waypoints")
-    return jsonify({"ok": True, "waypoints": len(route), "route": route})
+    uid = _current_uid()
+    st["route_status"]     = "calculating"
+    st["route_status_msg"] = f"Calculating {mode} route…"
+    st["route"]            = []
+    st["route_pending"]    = None
+
+    _route_executor.submit(_calc_route_bg, uid, st["lat"], st["lon"], dest_lat, dest_lon, mode)
+    return jsonify({"ok": True, "status": "calculating"})
 
 
 @app.route("/api/still", methods=["POST"])
@@ -701,9 +663,11 @@ def api_still():
     st = _require_state()
     if not st:
         return jsonify({"error": "not logged in"}), 401
-    st["mode"]  = "still"
-    st["route"] = []
-    st["speed"] = 0.0
+    st["mode"]             = "still"
+    st["route"]            = []
+    st["speed"]            = 0.0
+    st["route_status"]     = "idle"
+    st["route_status_msg"] = ""
     _log(st, "⏸️ Stopped")
     return jsonify({"ok": True})
 
@@ -719,8 +683,10 @@ def api_teleport():
         st["lon"] = float(body["lon"])
     except (KeyError, ValueError, TypeError):
         return jsonify({"ok": False, "error": "lat/lon required"}), 400
-    st["route"] = []
-    st["mode"]  = "still"
+    st["route"]            = []
+    st["mode"]             = "still"
+    st["route_status"]     = "idle"
+    st["route_status_msg"] = ""
     _log(st, f"✈️ Teleported → {st['lat']:.5f},{st['lon']:.5f}")
     return jsonify({"ok": True})
 
