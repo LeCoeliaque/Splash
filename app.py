@@ -75,6 +75,7 @@ def make_user_state() -> dict:
         "user_id": "",
         "expo_token": "",
         "location_jwt": "",
+        "location_refresh_token": "",
         # settings
         "saved_locations": dict(DEFAULT_SAVED_LOCATIONS),
         "home_location": "home",
@@ -195,6 +196,94 @@ def refresh_access_token(st: dict) -> bool:
         return False
 
 
+# ============ LOCATION TOKEN MANAGEMENT ============
+
+def issue_location_token(st: dict) -> bool:
+    """
+    Call once after login (or after a Supabase token refresh) to get
+    a fresh location JWT + location refresh token from the Splashin API.
+    Uses the current Supabase access_token as the bearer.
+    """
+    if not st.get("access_token"):
+        return False
+    try:
+        r = requests.get(
+            "https://splashin.app/api/v3/auth/location/issue",
+            headers={"Authorization": f"Bearer {st['access_token']}"},
+            timeout=10,
+        )
+        data = r.json()
+        # Accept whatever key name the API returns for the two tokens.
+        # Common patterns: token/jwt/access_token  and  refresh_token/refreshToken
+        jwt = (
+            data.get("token")
+            or data.get("jwt")
+            or data.get("access_token")
+            or data.get("locationToken")
+        )
+        rft = (
+            data.get("refresh_token")
+            or data.get("refreshToken")
+            or data.get("locationRefreshToken")
+        )
+        if jwt:
+            st["location_jwt"] = jwt
+            if rft:
+                st["location_refresh_token"] = rft
+            ulog(st, "🗝️ Location token issued")
+            return True
+        else:
+            ulog(st, f"⚠️ Location token issue failed: {data}")
+            return False
+    except Exception as e:
+        ulog(st, f"❌ Location token issue error: {e}")
+        return False
+
+
+def refresh_location_token(st: dict) -> bool:
+    """
+    Silently refresh the location JWT using the location refresh token.
+    Falls back to re-issuing from the Supabase access token if no
+    refresh token is stored yet.
+    """
+    rft = st.get("location_refresh_token")
+
+    if not rft:
+        # No refresh token yet — issue a brand-new one instead
+        return issue_location_token(st)
+
+    try:
+        r = requests.get(
+            "https://splashin.app/api/v3/auth/location/refresh",
+            headers={"refresh": rft},
+            timeout=10,
+        )
+        data = r.json()
+        jwt = (
+            data.get("token")
+            or data.get("jwt")
+            or data.get("access_token")
+            or data.get("locationToken")
+        )
+        new_rft = (
+            data.get("refresh_token")
+            or data.get("refreshToken")
+            or data.get("locationRefreshToken")
+        )
+        if jwt:
+            st["location_jwt"] = jwt
+            if new_rft:
+                st["location_refresh_token"] = new_rft
+            ulog(st, "🔄 Location token refreshed")
+            return True
+        else:
+            ulog(st, f"⚠️ Location token refresh failed: {data} — re-issuing…")
+            return issue_location_token(st)
+    except Exception as e:
+        ulog(st, f"❌ Location token refresh error: {e} — re-issuing…")
+        return issue_location_token(st)
+
+
 def reregister_device(st: dict):
     if not st.get("access_token") or not st.get("user_id"):
         return
@@ -258,8 +347,11 @@ def get_route(start_lat, start_lon, end_lat, end_lon, mode="walking"):
 # ============ LOCATION POST ============
 
 def post_location(st: dict):
+    # Prefer the dedicated location JWT (always kept fresh by the loop).
+    # Fall back to the Supabase access token only as a last resort.
     jwt = st.get("location_jwt") or st.get("access_token")
     if not jwt:
+        ulog(st, "⚠️ No token available for location post — skipping")
         return
 
     try:
@@ -330,11 +422,13 @@ def moved_enough(st: dict, lat, lon) -> bool:
 def movement_loop(user_id: str):
     SMOOTHING = 0.15
     TIME_SCALE = 0.6
-    TOKEN_REFRESH_INTERVAL = 3300
+    TOKEN_REFRESH_INTERVAL = 3300        # Supabase access token — every 55 min
+    LOCATION_TOKEN_REFRESH_INTERVAL = 3000  # Location JWT — every 50 min (slightly ahead)
     DEVICE_REGISTER_INTERVAL = 120
     IDLE_TIMEOUT = 3600  # 1 hour without activity = kill thread
 
     last_token_refresh = time.time()
+    last_location_token_refresh = time.time()
     last_device_register = time.time()
 
     while True:
@@ -353,10 +447,18 @@ def movement_loop(user_id: str):
             time.sleep(30)
             continue
 
-        # Periodic token refresh
+        # Periodic Supabase token refresh — then immediately re-issue location token
         if time.time() - last_token_refresh >= TOKEN_REFRESH_INTERVAL:
-            refresh_access_token(st)
+            if refresh_access_token(st):
+                # New Supabase token → get a fresh location JWT straight away
+                issue_location_token(st)
+                last_location_token_refresh = time.time()
             last_token_refresh = time.time()
+
+        # Periodic location token refresh (independent of Supabase refresh)
+        if time.time() - last_location_token_refresh >= LOCATION_TOKEN_REFRESH_INTERVAL:
+            refresh_location_token(st)
+            last_location_token_refresh = time.time()
 
         # Periodic device re-register
         if time.time() - last_device_register >= DEVICE_REGISTER_INTERVAL:
@@ -554,6 +656,7 @@ def api_login():
                 st["expo_token"] = user_meta["expo_token"]
 
             fetch_real_location(st)
+            issue_location_token(st)   # get location JWT before first post
             ensure_user_thread(user_id)
             reregister_device(st)
             ulog(st, f"✅ Logged in as {email}")
