@@ -8,347 +8,228 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --void:#020408;--deep:#060c14;--panel:#0a1220;--raised:#142038;
+  --border:rgba(180,140,60,0.2);--border-bright:rgba(180,140,60,0.5);
+  --gold:#c8922a;--gold-bright:#f0b944;--gold-pale:rgba(200,146,42,0.12);
+  --red:#c0392b;--red-bright:#e74c3c;--red-pale:rgba(192,57,43,0.14);
+  --cyan:#1a9fcf;--cyan-bright:#3dbde8;--cyan-pale:rgba(26,159,207,0.12);
+  --text:#d4c4a0;--text-bright:#f0e8d0;--text-muted:#7a6e5a;
+  --green:#2ecc71;--green-pale:rgba(46,204,113,0.12);
+}
+html,body{height:100%;overflow:hidden;background:var(--void)}
+body{color:var(--text);font-family:'Rajdhani',sans-serif;font-size:14px;display:flex;flex-direction:column}
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* ── HEADER ── */
+#header{background:var(--panel);border-bottom:1px solid var(--border);padding:0 14px;height:50px;display:flex;align-items:center;gap:10px;flex-shrink:0;z-index:100;position:relative}
+#header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.arc-reactor{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--cyan-bright);display:flex;align-items:center;justify-content:center;flex-shrink:0;animation:pulse-arc 3s ease-in-out infinite}
+.arc-reactor::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--cyan-bright)}
+@keyframes pulse-arc{0%,100%{opacity:1}50%{opacity:0.5}}
+#header h1{font-size:14px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gold-bright);white-space:nowrap;flex:1}
+.spoof-badge{display:flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;white-space:nowrap}
+.spoof-badge .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.badge-on{border-color:var(--green);color:var(--green);background:var(--green-pale)}
+.badge-on .dot{background:var(--green);animation:blink 1.2s step-end infinite}
+.badge-off{border-color:var(--red-bright);color:var(--red-bright);background:var(--red-pale)}
+.badge-off .dot{background:var(--red-bright)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.15}}
 
-:root {
-  --void: #020408;
-  --deep: #060c14;
-  --panel: #0a1220;
-  --raised: #142038;
-  --border: rgba(180,140,60,0.2);
-  --border-bright: rgba(180,140,60,0.5);
-  --gold: #c8922a;
-  --gold-bright: #f0b944;
-  --gold-pale: rgba(200,146,42,0.12);
-  --red: #c0392b;
-  --red-bright: #e74c3c;
-  --red-pale: rgba(192,57,43,0.14);
-  --cyan: #1a9fcf;
-  --cyan-bright: #3dbde8;
-  --cyan-pale: rgba(26,159,207,0.12);
-  --text: #d4c4a0;
-  --text-bright: #f0e8d0;
-  --text-muted: #7a6e5a;
-  --green: #2ecc71;
-  --green-pale: rgba(46,204,113,0.12);
+/* ── ROUTE STATUS BANNER ── */
+#route-banner{
+  display:none;flex-shrink:0;align-items:center;gap:10px;
+  padding:0 16px;height:34px;
+  font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1.5px;
+  border-bottom:1px solid var(--border);
+  z-index:99;
 }
+#route-banner.show{display:flex}
+#route-banner.calculating{background:rgba(200,146,42,0.1);color:var(--gold-bright)}
+#route-banner.ready{background:rgba(46,204,113,0.08);color:var(--green)}
+#route-banner.error{background:rgba(192,57,43,0.1);color:var(--red-bright)}
+.banner-spinner{width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.banner-check{flex-shrink:0;font-size:13px}
 
-html, body { height: 100%; overflow: hidden; background: var(--void); }
-body { color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 14px; display: flex; flex-direction: column; }
+/* ── APP ── */
+#app{flex:1;display:flex;overflow:hidden;position:relative}
 
-/* HEADER */
-#header {
-  background: var(--panel); border-bottom: 1px solid var(--border);
-  padding: 0 14px; height: 50px;
-  display: flex; align-items: center; gap: 10px;
-  flex-shrink: 0; z-index: 100; position: relative;
-}
-#header::after {
-  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
-}
-.arc-reactor {
-  width: 22px; height: 22px; border-radius: 50%;
-  border: 1.5px solid var(--cyan-bright);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  animation: pulse-arc 3s ease-in-out infinite;
-}
-.arc-reactor::after { content:''; width:8px; height:8px; border-radius:50%; background:var(--cyan-bright); }
-@keyframes pulse-arc { 0%,100%{opacity:1} 50%{opacity:0.5} }
-#header h1 { font-size: 14px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--gold-bright); white-space: nowrap; flex: 1; }
+/* ── MAP ── */
+.leaflet-container{background:#0d1a2e!important}
+.leaflet-control-attribution{display:none!important}
+.leaflet-control-zoom a{background:var(--panel)!important;border-color:var(--border-bright)!important;color:var(--gold-bright)!important;font-weight:700!important;width:32px!important;height:32px!important;line-height:32px!important}
+.leaflet-control-zoom a:hover{background:var(--raised)!important}
 
-.spoof-badge {
-  display: flex; align-items: center; gap: 5px;
-  padding: 4px 10px; border: 1px solid;
-  font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap;
-}
-.spoof-badge .dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-.badge-on  { border-color: var(--green);      color: var(--green);      background: var(--green-pale); }
-.badge-on .dot  { background: var(--green);      animation: blink 1.2s step-end infinite; }
-.badge-off { border-color: var(--red-bright); color: var(--red-bright); background: var(--red-pale);   }
-.badge-off .dot { background: var(--red-bright); }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.15} }
+/* ── MAP HUD ── */
+#map-hud{position:absolute;top:10px;left:10px;z-index:400;pointer-events:none;display:flex;flex-direction:column;gap:6px}
+.hud-chip{display:inline-flex;align-items:center;gap:8px;background:rgba(6,12,20,0.88);border:1px solid var(--border-bright);padding:5px 11px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:1px}
+.cv{color:var(--cyan-bright)}.cl{color:var(--gold)}
 
-/* APP LAYOUT */
-#app { flex: 1; display: flex; overflow: hidden; position: relative; }
+/* ── SIDEBAR ── */
+#sidebar{width:280px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;z-index:50}
+.sidebar-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--deep);flex-shrink:0}
+.tab{flex:1;padding:11px 4px;text-align:center;cursor:pointer;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);border-bottom:2px solid transparent;transition:all 0.15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--gold-bright);border-bottom-color:var(--gold-bright);background:var(--gold-pale)}
+.tab-content{flex:1;overflow-y:auto;padding:14px;display:none}
+.tab-content.active{display:block}
+.tab-content::-webkit-scrollbar{width:3px}
+.tab-content::-webkit-scrollbar-thumb{background:var(--gold)}
 
-/* MAP */
-#map { flex: 1; z-index: 1; }
-.leaflet-container { background: #0d1a2e !important; }
-.leaflet-control-attribution { display: none !important; }
-.leaflet-control-zoom a {
-  background: var(--panel) !important; border-color: var(--border-bright) !important;
-  color: var(--gold-bright) !important; font-weight: 700 !important;
-  width: 32px !important; height: 32px !important; line-height: 32px !important;
-}
-.leaflet-control-zoom a:hover { background: var(--raised) !important; }
+/* ── SECTIONS ── */
+.section{margin-bottom:18px}
+.sec-label{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:3px;color:var(--gold);text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.sec-label::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)}
 
-/* MAP HUD */
-#map-hud {
-  position: absolute; top: 10px; left: 10px;
-  z-index: 400; pointer-events: none;
-  display: flex; flex-direction: column; gap: 6px;
-}
-.hud-chip {
-  display: inline-flex; align-items: center; gap: 8px;
-  background: rgba(6,12,20,0.88); border: 1px solid var(--border-bright);
-  padding: 5px 11px; font-family: 'Share Tech Mono', monospace; font-size: 10px;
-  color: var(--text-muted); letter-spacing: 1px;
-}
-.cv { color: var(--cyan-bright); }
-.cl { color: var(--gold); }
+/* ── STAT ROWS ── */
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(180,140,60,0.07);font-size:13px}
+.stat-row:last-child{border-bottom:none}
+.stat-k{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:1px}
+.stat-v{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--cyan-bright)}
+.stat-v.good{color:var(--green)}.stat-v.warn{color:var(--gold-bright)}.stat-v.bad{color:var(--red-bright)}
+.battery-bar{height:5px;background:rgba(255,255,255,0.05);border:1px solid var(--border);overflow:hidden;margin-top:6px}
+.battery-fill{height:100%;transition:width 0.8s,background 0.5s}
 
-/* DESKTOP SIDEBAR */
-#sidebar {
-  width: 280px; background: var(--panel); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; z-index: 50;
-}
-.sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--deep); flex-shrink: 0; }
-.tab {
-  flex: 1; padding: 11px 4px; text-align: center; cursor: pointer;
-  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-  color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s;
-}
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--gold-bright); border-bottom-color: var(--gold-bright); background: var(--gold-pale); }
-.tab-content { flex: 1; overflow-y: auto; padding: 14px; display: none; }
-.tab-content.active { display: block; }
-.tab-content::-webkit-scrollbar { width: 3px; }
-.tab-content::-webkit-scrollbar-thumb { background: var(--gold); }
+.mode-btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:4px}
+.mode-btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:9px 4px;background:var(--deep);border:1px solid var(--border);color:var(--text-muted);cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;transition:all 0.15s;-webkit-tap-highlight-color:transparent}
+.mode-btn .mi{font-size:15px;line-height:1}
+.mode-btn:hover{border-color:var(--border-bright);color:var(--text)}
+.mode-btn.active{background:var(--gold-pale);border-color:var(--gold-bright);color:var(--gold-bright)}
+.hud-progress{display:flex;gap:2px;margin-top:6px}
+.hud-seg{flex:1;height:5px;background:rgba(255,255,255,0.04);border:1px solid var(--border);transition:background 0.2s}
+.hud-seg.filled{background:var(--gold);border-color:var(--gold-bright)}
 
-/* SECTION LABEL */
-.section { margin-bottom: 18px; }
-.sec-label {
-  font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 3px;
-  color: var(--gold); text-transform: uppercase; margin-bottom: 8px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sec-label::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, var(--border), transparent); }
+/* ── GOTO ── */
+.goto-wrap{background:var(--deep);border:1px solid var(--border);padding:12px}
+.field-row{margin-bottom:8px}
+.field-lbl{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--gold);letter-spacing:2px;text-transform:uppercase;margin-bottom:3px}
+.hud-input{width:100%;background:var(--void);border:1px solid var(--border);padding:9px 10px;color:var(--text-bright);font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;transition:border-color 0.2s;-webkit-appearance:none;border-radius:0}
+.hud-input:focus{border-color:var(--gold-bright);background:rgba(200,146,42,0.04)}
+.hud-input::placeholder{color:var(--text-muted);opacity:0.6}
+.act-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px}
 
-/* STAT ROWS */
-.stat-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 7px 0; border-bottom: 1px solid rgba(180,140,60,0.07); font-size: 13px;
-}
-.stat-row:last-child { border-bottom: none; }
-.stat-k { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--text-muted); letter-spacing: 1px; }
-.stat-v { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--cyan-bright); }
-.stat-v.good { color: var(--green); }
-.stat-v.warn { color: var(--gold-bright); }
-.stat-v.bad  { color: var(--red-bright); }
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border:1px solid var(--border);background:transparent;color:var(--text);font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:all 0.15s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation;min-height:44px}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:0.4;cursor:default;transform:none}
+.btn-gold{background:var(--gold-pale);border-color:var(--gold-bright);color:var(--gold-bright)}
+.btn-gold:not(:disabled):hover{background:rgba(200,146,42,0.22)}
+.btn-red{background:var(--red-pale);border-color:var(--red-bright);color:var(--red-bright)}
+.btn-red:not(:disabled):hover{background:rgba(192,57,43,0.25)}
+.btn-cyan{background:var(--cyan-pale);border-color:var(--cyan-bright);color:var(--cyan-bright)}
+.btn-cyan:not(:disabled):hover{background:rgba(26,159,207,0.22)}
+.btn-ghost{background:rgba(255,255,255,0.04);border-color:var(--border);color:var(--text-muted)}
+.btn-ghost:not(:disabled):hover{border-color:var(--border-bright);color:var(--text)}
+.btn-full{width:100%}
 
-.battery-bar { height: 5px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); overflow: hidden; margin-top: 6px; }
-.battery-fill { height: 100%; transition: width 0.8s, background 0.5s; }
+/* Button loading spinner */
+.btn-spin{display:inline-block;width:11px;height:11px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite}
 
-.mode-btns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 4px; }
-.mode-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 9px 4px; background: var(--deep); border: 1px solid var(--border);
-  color: var(--text-muted); cursor: pointer;
-  font-family: 'Rajdhani', sans-serif; font-size: 10px; font-weight: 700;
-  letter-spacing: 1px; text-transform: uppercase; transition: all 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.mode-btn .mi { font-size: 15px; line-height: 1; }
-.mode-btn:hover { border-color: var(--border-bright); color: var(--text); }
-.mode-btn.active { background: var(--gold-pale); border-color: var(--gold-bright); color: var(--gold-bright); }
+/* ── LOCATIONS ── */
+.loc-item{background:var(--deep);border:1px solid var(--border);padding:9px 10px;margin-bottom:6px;display:flex;align-items:center;gap:8px;transition:border-color 0.15s}
+.loc-item:hover{border-color:var(--gold)}
+.loc-name{font-weight:700;font-size:12px;letter-spacing:1px;color:var(--text-bright);text-transform:uppercase}
+.loc-coords{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-muted);margin-top:1px}
+.loc-acts{display:flex;gap:3px;margin-left:auto;flex-shrink:0}
+.loc-btn{padding:6px 8px;min-height:32px;border:1px solid var(--border);background:transparent;color:var(--text-muted);font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;font-family:'Rajdhani',sans-serif;transition:all 0.12s;-webkit-tap-highlight-color:transparent}
+.loc-btn:hover{border-color:var(--gold);color:var(--gold-bright)}
+.loc-btn.del:hover{border-color:var(--red-bright);color:var(--red-bright)}
 
-.hud-progress { display: flex; gap: 2px; margin-top: 6px; }
-.hud-seg { flex:1; height:5px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); transition: background 0.2s; }
-.hud-seg.filled { background: var(--gold); border-color: var(--gold-bright); }
+/* ── LOG ── */
+.log-wrap{border-top:1px solid var(--border);display:flex;flex-direction:column;max-height:160px;flex-shrink:0}
+.log-hdr{display:flex;align-items:center;justify-content:space-between;padding:6px 14px;background:var(--deep);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:3px;color:var(--gold);text-transform:uppercase}
+.log-live{width:5px;height:5px;border-radius:50%;background:var(--green);animation:blink 1.5s step-end infinite}
+.log-scroll{flex:1;overflow-y:auto;padding:6px 14px;font-family:'Share Tech Mono',monospace;font-size:10px;line-height:1.8}
+.log-scroll::-webkit-scrollbar{width:2px}
+.log-scroll::-webkit-scrollbar-thumb{background:var(--gold)}
+.log-e{display:flex;gap:8px}
+.log-t{color:var(--gold);flex-shrink:0}
+.log-m{color:var(--text-muted);word-break:break-all}
+.cfg-row{margin-bottom:10px}
 
-/* GO-TO PANEL */
-.goto-wrap { background: var(--deep); border: 1px solid var(--border); padding: 12px; }
-.field-row { margin-bottom: 8px; }
-.field-lbl { font-family:'Share Tech Mono',monospace; font-size:9px; color:var(--gold); letter-spacing:2px; text-transform:uppercase; margin-bottom:3px; }
-.hud-input {
-  width: 100%; background: var(--void); border: 1px solid var(--border);
-  padding: 9px 10px; color: var(--text-bright);
-  font-family: 'Share Tech Mono', monospace; font-size: 13px;
-  outline: none; transition: border-color 0.2s;
-  -webkit-appearance: none; border-radius: 0;
-}
-.hud-input:focus { border-color: var(--gold-bright); background: rgba(200,146,42,0.04); }
-.hud-input::placeholder { color: var(--text-muted); opacity: 0.6; }
-.act-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+/* ── TOASTS ── */
+#toast-area{position:fixed;top:60px;right:14px;z-index:9000;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:280px}
+.toast{display:flex;align-items:flex-start;gap:9px;padding:10px 13px;background:var(--panel);border:1px solid var(--border);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;line-height:1.5;pointer-events:auto;animation:toast-in 0.2s ease;transition:opacity 0.3s,transform 0.3s}
+.toast.dying{opacity:0;transform:translateX(20px)}
+.toast-icon{flex-shrink:0;font-size:13px;line-height:1.4}
+.toast-msg{color:var(--text);word-break:break-word}
+.toast.t-ok{border-color:var(--green);background:rgba(46,204,113,0.06)}
+.toast.t-ok .toast-icon{color:var(--green)}
+.toast.t-warn{border-color:var(--gold-bright);background:rgba(200,146,42,0.06)}
+.toast.t-warn .toast-icon{color:var(--gold-bright)}
+.toast.t-err{border-color:var(--red-bright);background:rgba(192,57,43,0.08)}
+.toast.t-err .toast-icon{color:var(--red-bright)}
+.toast.t-info{border-color:var(--cyan-bright);background:rgba(26,159,207,0.06)}
+.toast.t-info .toast-icon{color:var(--cyan-bright)}
+@keyframes toast-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
 
-/* BUTTONS */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  padding: 10px 14px; border: 1px solid var(--border); background: transparent;
-  color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 12px;
-  font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
-  cursor: pointer; transition: all 0.15s; white-space: nowrap;
-  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
-  min-height: 44px;
-}
-.btn:active { transform: scale(0.97); }
-.btn:disabled { opacity: 0.3; cursor: default; }
-.btn-gold  { background: var(--gold-pale);  border-color: var(--gold-bright); color: var(--gold-bright); }
-.btn-gold:hover  { background: rgba(200,146,42,0.22); }
-.btn-red   { background: var(--red-pale);   border-color: var(--red-bright);  color: var(--red-bright);  }
-.btn-red:hover   { background: rgba(192,57,43,0.25); }
-.btn-cyan  { background: var(--cyan-pale);  border-color: var(--cyan-bright); color: var(--cyan-bright); }
-.btn-cyan:hover  { background: rgba(26,159,207,0.22); }
-.btn-ghost { background: rgba(255,255,255,0.04); border-color: var(--border); color: var(--text-muted); }
-.btn-ghost:hover { border-color: var(--border-bright); color: var(--text); }
-.btn-full  { width: 100%; }
+/* ── LOGIN ── */
+#login-overlay{position:fixed;inset:0;background:rgba(2,4,8,0.97);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px}
+#login-overlay.hidden{display:none}
+.login-card{background:var(--panel);border:1px solid var(--border-bright);padding:32px 24px;width:100%;max-width:360px;position:relative}
+.login-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold-bright),transparent)}
+.login-logo{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.login-arc{width:34px;height:34px;border-radius:50%;border:2px solid var(--cyan-bright);display:flex;align-items:center;justify-content:center;flex-shrink:0;animation:pulse-arc 2s ease-in-out infinite}
+.login-arc::after{content:'';width:10px;height:10px;border-radius:50%;background:var(--cyan-bright)}
+.login-card h2{font-size:20px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gold-bright)}
+.login-sub{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:2px;margin-bottom:22px;text-transform:uppercase}
+.login-err{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--red-bright);min-height:16px;margin-bottom:10px;letter-spacing:1px}
 
-/* LOCATIONS */
-.loc-item {
-  background: var(--deep); border: 1px solid var(--border);
-  padding: 9px 10px; margin-bottom: 6px;
-  display: flex; align-items: center; gap: 8px; transition: border-color 0.15s;
-}
-.loc-item:hover { border-color: var(--gold); }
-.loc-name { font-weight: 700; font-size: 12px; letter-spacing: 1px; color: var(--text-bright); text-transform: uppercase; }
-.loc-coords { font-family: 'Share Tech Mono', monospace; font-size: 9px; color: var(--text-muted); margin-top: 1px; }
-.loc-acts { display: flex; gap: 3px; margin-left: auto; flex-shrink: 0; }
-.loc-btn {
-  padding: 6px 8px; min-height: 32px; border: 1px solid var(--border); background: transparent;
-  color: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 1px;
-  cursor: pointer; font-family: 'Rajdhani', sans-serif; transition: all 0.12s;
-  -webkit-tap-highlight-color: transparent;
-}
-.loc-btn:hover { border-color: var(--gold); color: var(--gold-bright); }
-.loc-btn.del:hover { border-color: var(--red-bright); color: var(--red-bright); }
+/* ── MOBILE SHEET ── */
+#mobile-sheet{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--border-bright);z-index:500;flex-direction:column;max-height:78vh;transform:translateY(calc(100% - 52px));transition:transform 0.3s cubic-bezier(0.4,0,0.2,1)}
+#mobile-sheet.open{transform:translateY(0)}
+.sheet-handle-row{display:flex;align-items:center;height:52px;padding:0 12px;flex-shrink:0;background:var(--deep);border-bottom:1px solid var(--border);-webkit-tap-highlight-color:transparent}
+.sheet-drag{width:32px;height:3px;background:var(--border-bright);border-radius:2px;flex-shrink:0;cursor:row-resize;margin-right:10px}
+.sheet-tabs{display:flex;flex:1;height:52px}
+.sheet-tab{flex:1;height:52px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s;-webkit-tap-highlight-color:transparent}
+.sheet-tab.active{color:var(--gold-bright);border-bottom-color:var(--gold-bright)}
+.sheet-body{overflow-y:auto;padding:14px;flex:1}
+.sheet-body::-webkit-scrollbar{display:none}
+.sheet-log{max-height:90px;border-top:1px solid var(--border)}
+.sheet-log .log-hdr{padding:5px 14px}
 
-/* LOG */
-.log-wrap { border-top: 1px solid var(--border); display: flex; flex-direction: column; max-height: 160px; flex-shrink: 0; }
-.log-hdr {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 14px; background: var(--deep);
-  font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 3px; color: var(--gold); text-transform: uppercase;
-}
-.log-live { width: 5px; height: 5px; border-radius: 50%; background: var(--green); animation: blink 1.5s step-end infinite; }
-.log-scroll { flex: 1; overflow-y: auto; padding: 6px 14px; font-family: 'Share Tech Mono', monospace; font-size: 10px; line-height: 1.8; }
-.log-scroll::-webkit-scrollbar { width: 2px; }
-.log-scroll::-webkit-scrollbar-thumb { background: var(--gold); }
-.log-e { display: flex; gap: 8px; }
-.log-t { color: var(--gold); flex-shrink: 0; }
-.log-m { color: var(--text-muted); word-break: break-all; }
+/* ── FABs ── */
+#fab-area{display:none;position:fixed;bottom:62px;right:14px;z-index:490;flex-direction:column;gap:8px;align-items:flex-end}
+.fab{display:flex;align-items:center;gap:8px;height:48px;padding:0 18px;border:1px solid;background:var(--panel);font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.fab:active{transform:scale(0.96)}
+.fab-on{border-color:var(--red-bright);color:var(--red-bright);background:var(--red-pale)}
+.fab-off{border-color:var(--gold-bright);color:var(--gold-bright);background:var(--gold-pale)}
+.fab-stop{border-color:var(--border-bright);color:var(--text-muted)}
 
-/* CONFIG */
-.cfg-row { margin-bottom: 10px; }
-
-/* LOGIN */
-#login-overlay {
-  position: fixed; inset: 0; background: rgba(2,4,8,0.97);
-  display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 20px;
+/* ── RESPONSIVE ── */
+@media(max-width:700px){
+  #sidebar{display:none}
+  #mobile-sheet{display:flex}
+  #fab-area{display:flex}
+  #map-hud{top:auto;bottom:62px;flex-direction:row;flex-wrap:wrap;gap:5px}
+  .leaflet-control-zoom{margin-bottom:72px!important}
+  #header h1{font-size:12px;letter-spacing:2px}
+  .spoof-badge,#hdr-toggle,#hdr-standby{display:none}
+  #toast-area{top:auto;bottom:72px;right:8px;left:8px;max-width:none;align-items:stretch}
 }
-#login-overlay.hidden { display: none; }
-.login-card {
-  background: var(--panel); border: 1px solid var(--border-bright);
-  padding: 32px 24px; width: 100%; max-width: 360px; position: relative;
+@media(min-width:701px){
+  #mobile-sheet{display:none!important}
+  #fab-area{display:none!important}
 }
-.login-card::before {
-  content:''; position:absolute; top:0; left:0; right:0; height:2px;
-  background: linear-gradient(90deg, transparent, var(--gold-bright), transparent);
-}
-.login-logo { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
-.login-arc {
-  width:34px; height:34px; border-radius:50%; border:2px solid var(--cyan-bright);
-  display:flex; align-items:center; justify-content:center; flex-shrink:0;
-  animation: pulse-arc 2s ease-in-out infinite;
-}
-.login-arc::after { content:''; width:10px; height:10px; border-radius:50%; background:var(--cyan-bright); }
-.login-card h2 { font-size:20px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:var(--gold-bright); }
-.login-sub { font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--text-muted); letter-spacing:2px; margin-bottom:22px; text-transform:uppercase; }
-.login-err { font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--red-bright); min-height:16px; margin-bottom:10px; letter-spacing:1px; }
-
-/* MOBILE BOTTOM SHEET */
-#mobile-sheet {
-  display: none; position: fixed; bottom:0; left:0; right:0;
-  background: var(--panel); border-top: 1px solid var(--border-bright);
-  z-index: 500; flex-direction: column; max-height: 78vh;
-  transform: translateY(calc(100% - 52px));
-  transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
-}
-#mobile-sheet.open { transform: translateY(0); }
-
-.sheet-handle-row {
-  display: flex; align-items: center; height: 52px;
-  padding: 0 12px; flex-shrink: 0; background: var(--deep);
-  border-bottom: 1px solid var(--border);
-  -webkit-tap-highlight-color: transparent;
-}
-.sheet-drag { width: 32px; height: 3px; background: var(--border-bright); border-radius: 2px; flex-shrink: 0; cursor: row-resize; margin-right: 10px; }
-.sheet-tabs { display: flex; flex: 1; height: 52px; }
-.sheet-tab {
-  flex: 1; height: 52px; display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-  color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent;
-  transition: all 0.15s; -webkit-tap-highlight-color: transparent;
-}
-.sheet-tab.active { color: var(--gold-bright); border-bottom-color: var(--gold-bright); }
-.sheet-body { overflow-y: auto; padding: 14px; flex: 1; }
-.sheet-body::-webkit-scrollbar { display: none; }
-.sheet-log { max-height: 90px; border-top: 1px solid var(--border); }
-.sheet-log .log-hdr { padding: 5px 14px; }
-
-/* MOBILE FABs */
-#fab-area {
-  display: none; position: fixed; bottom: 62px; right: 14px;
-  z-index: 490; flex-direction: column; gap: 8px; align-items: flex-end;
-}
-.fab {
-  display: flex; align-items: center; gap: 8px;
-  height: 48px; padding: 0 18px;
-  border: 1px solid; background: var(--panel);
-  font-family: 'Rajdhani', sans-serif; font-size: 12px; font-weight: 700;
-  letter-spacing: 2px; text-transform: uppercase; cursor: pointer;
-  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
-}
-.fab:active { transform: scale(0.96); }
-.fab-on  { border-color: var(--red-bright);  color: var(--red-bright);  background: var(--red-pale);  }
-.fab-off { border-color: var(--gold-bright); color: var(--gold-bright); background: var(--gold-pale); }
-.fab-stop { border-color: var(--border-bright); color: var(--text-muted); }
-
-/* RESPONSIVE */
-@media (max-width: 700px) {
-  #sidebar { display: none; }
-  #mobile-sheet { display: flex; }
-  #fab-area { display: flex; }
-  #map-hud {
-    position: absolute;
-    top: auto;
-    right: auto;
-    bottom: 62px;
-    left: 10px;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-  .leaflet-control-zoom { margin-bottom: 72px !important; }
-  #header h1 { font-size: 12px; letter-spacing: 2px; }
-  .spoof-badge { display: none; }
-  #hdr-toggle { display: none; }
-  #hdr-standby { display: none; }
-}
-@media (min-width: 701px) {
-  #mobile-sheet { display: none !important; }
-  #fab-area { display: none !important; }
-}
-
-#map-container { position: relative; flex: 1; height: 100%; }
-#map { width: 100%; height: 100%; }
-#map-hud { position: absolute; top: 10px; left: 10px; z-index: 400; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-#map-hud * { pointer-events: auto; }
+#map-container{position:relative;flex:1;height:100%}
+#map{width:100%;height:100%}
+#map-hud{position:absolute;top:10px;left:10px;z-index:400;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+#map-hud *{pointer-events:auto}
 </style>
 </head>
 <body>
 
+<!-- TOASTS -->
+<div id="toast-area"></div>
+
 <!-- LOGIN -->
 <div id="login-overlay">
   <div class="login-card">
-    <div class="login-logo">
-      <div class="login-arc"></div>
-      <div>
-        <h2>JARVIS</h2>
-        <div class="login-sub">Splashin Location Control</div>
-      </div>
-    </div>
+    <div class="login-logo"><div class="login-arc"></div><div>
+      <h2>JARVIS</h2>
+      <div class="login-sub">Splashin Location Control</div>
+    </div></div>
     <div class="field-row">
       <div class="field-lbl">// Operator ID</div>
       <input class="hud-input" type="email" id="login-email" placeholder="user@domain.com" autocomplete="email"/>
@@ -366,18 +247,21 @@ body { color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 14px;
 <div id="header">
   <div class="arc-reactor"></div>
   <h1>Splashin Switch</h1>
-  <div id="spoof-badge" class="spoof-badge badge-off">
-    <div class="dot"></div><span id="badge-text">OFFLINE</span>
-  </div>
+  <div id="spoof-badge" class="spoof-badge badge-off"><div class="dot"></div><span id="badge-text">OFFLINE</span></div>
   <button class="btn btn-gold" id="hdr-toggle" onclick="toggleSpoofing()" style="font-size:12px">ENGAGE</button>
   <button class="btn btn-ghost" id="hdr-standby" onclick="stillBtn()" style="font-size:12px">STANDBY</button>
   <button class="btn btn-ghost" id="hdr-logout" onclick="doLogout()" style="font-size:11px;padding:8px 10px;letter-spacing:1px">LOGOUT</button>
 </div>
 
+<!-- ROUTE STATUS BANNER -->
+<div id="route-banner">
+  <span id="banner-icon" class="banner-spinner"></span>
+  <span id="banner-text">Calculating route…</span>
+</div>
+
 <!-- APP -->
 <div id="app">
-
-  <!-- DESKTOP SIDEBAR -->
+  <!-- SIDEBAR -->
   <div id="sidebar">
     <div class="sidebar-tabs">
       <div class="tab active" onclick="switchTab('status')">Status</div>
@@ -430,14 +314,14 @@ body { color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 14px;
             <div class="field-lbl">Longitude</div>
             <input class="hud-input" type="number" id="dest-lon" placeholder="00.000000" step="0.0001"/>
           </div>
-          <p style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-muted);letter-spacing:1px;margin-bottom:10px;">
+          <p style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-muted);letter-spacing:1px;margin-bottom:10px">
             Type coords or tap the map — then choose action
           </p>
           <div class="act-btns">
-            <button class="btn btn-cyan" onclick="goTo('walking')">WALK</button>
-            <button class="btn btn-gold" onclick="goTo('driving')">DRIVE</button>
+            <button class="btn btn-cyan" id="btn-walk" onclick="goTo('walking')">WALK</button>
+            <button class="btn btn-gold" id="btn-drive" onclick="goTo('driving')">DRIVE</button>
           </div>
-          <button class="btn btn-ghost btn-full" onclick="teleportTo()">◈ TELEPORT</button>
+          <button class="btn btn-ghost btn-full" id="btn-teleport" onclick="teleportTo()">◈ TELEPORT</button>
         </div>
       </div>
     </div>
@@ -466,12 +350,10 @@ body { color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 14px;
       </div>
       <div class="section">
         <div class="sec-label">Auth Override</div>
-        <div class="cfg-row"><div class="field-lbl">Location JWT (optional)</div><input class="hud-input" type="text" id="cfg-loc-jwt" placeholder="eyJ... (leave blank to use login token)"/></div>
+        <div class="cfg-row"><div class="field-lbl">Location JWT (optional)</div><input class="hud-input" type="text" id="cfg-loc-jwt" placeholder="eyJ… (leave blank to auto-manage)"/></div>
       </div>
       <button class="btn btn-gold btn-full" onclick="saveSettings()">COMMIT CHANGES</button>
-      <div style="margin-top:10px">
-        <button class="btn btn-ghost btn-full" onclick="doLogout()">TERMINATE SESSION</button>
-      </div>
+      <div style="margin-top:10px"><button class="btn btn-ghost btn-full" onclick="doLogout()">TERMINATE SESSION</button></div>
     </div>
 
     <!-- LOG -->
@@ -517,125 +399,215 @@ body { color: var(--text); font-family: 'Rajdhani', sans-serif; font-size: 14px;
 </div>
 
 <script>
-// ── MAP ──
-const map = L.map('map', {zoomControl: true}).setView([39.5, -98.35], 4);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  maxZoom: 19, subdomains: 'abcd'
-}).addTo(map);
+// ══════════════════════════════════════════════
+// TOAST SYSTEM
+// ══════════════════════════════════════════════
+const ICONS = {ok:'✅', warn:'⚠️', err:'❌', info:'◈'};
+function toast(msg, type='info', ttl=3500) {
+  const area = document.getElementById('toast-area');
+  const el   = document.createElement('div');
+  el.className = `toast t-${type}`;
+  el.innerHTML = `<span class="toast-icon">${ICONS[type]||'◈'}</span><span class="toast-msg">${msg}</span>`;
+  area.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('dying');
+    setTimeout(() => el.remove(), 350);
+  }, ttl);
+}
 
-function mkIcon(spoofing) {
-  const c = spoofing ? '#3dbde8' : '#f0b944';
-  return L.divIcon({
-    html: `<div style="width:16px;height:16px;background:${c};clip-path:polygon(50% 0%,100% 50%,50% 100%,0% 50%);"></div>`,
-    iconSize:[16,16], iconAnchor:[8,8], className:''
+// ══════════════════════════════════════════════
+// MAP
+// ══════════════════════════════════════════════
+const map = L.map('map', {zoomControl:true}).setView([39.5,-98.35],4);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd'}).addTo(map);
+
+function mkIcon(on) {
+  const c = on ? '#3dbde8' : '#f0b944';
+  return L.divIcon({html:`<div style="width:16px;height:16px;background:${c};clip-path:polygon(50% 0%,100% 50%,50% 100%,0% 50%)"></div>`,iconSize:[16,16],iconAnchor:[8,8],className:''});
+}
+
+let marker=null, routeLine=null, clickMarker=null;
+let isSpoofing=false, savedLocs={};
+let lastRouteStatus='idle';
+
+function setMarker(lat,lon) {
+  if(!marker){marker=L.marker([lat,lon],{icon:mkIcon(isSpoofing)}).addTo(map);map.setView([lat,lon],14);}
+  else{marker.setLatLng([lat,lon]);marker.setIcon(mkIcon(isSpoofing));}
+}
+function drawRoute(route) {
+  if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+  if(!route||route.length<2)return;
+  routeLine=L.polyline(route.map(p=>[p[0],p[1]]),{color:'#f0b944',weight:2.5,opacity:0.85,dashArray:'8,5'}).addTo(map);
+}
+
+map.on('click', e => {
+  if(clickMarker)map.removeLayer(clickMarker);
+  clickMarker=L.circleMarker([e.latlng.lat,e.latlng.lng],{radius:10,color:'#f0b944',fillColor:'#f0b944',fillOpacity:0.15,weight:1.5,dashArray:'4,3'}).addTo(map);
+  setCoords(e.latlng.lat,e.latlng.lng);
+  if(window.innerWidth<=700){switchMobileTab('goto');openSheet();}
+});
+
+function setCoords(lat,lon) {
+  ['dest-lat','m-dest-lat'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=lat.toFixed(6);});
+  ['dest-lon','m-dest-lon'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=lon.toFixed(6);});
+}
+
+// ══════════════════════════════════════════════
+// ROUTE STATUS BANNER
+// ══════════════════════════════════════════════
+let bannerTimer = null;
+function updateBanner(status, msg) {
+  if(status === lastRouteStatus) return;
+  lastRouteStatus = status;
+  const banner = document.getElementById('route-banner');
+  const icon   = document.getElementById('banner-icon');
+  const text   = document.getElementById('banner-text');
+  clearTimeout(bannerTimer);
+
+  if(status === 'idle') { banner.className=''; banner.style.display='none'; return; }
+
+  banner.style.display='';
+  banner.className = `show ${status}`;
+  text.textContent = msg || status;
+
+  if(status === 'calculating') {
+    icon.className = 'banner-spinner';
+    icon.textContent = '';
+    // boost poll rate while calculating
+    setPollInterval(400);
+  } else if(status === 'ready') {
+    icon.className = 'banner-check';
+    icon.textContent = '✓';
+    setPollInterval(2000);
+    bannerTimer = setTimeout(() => {
+      banner.className = ''; banner.style.display = 'none';
+      lastRouteStatus = 'idle';
+    }, 2500);
+  } else if(status === 'error') {
+    icon.className = 'banner-check';
+    icon.textContent = '✕';
+    setPollInterval(2000);
+    bannerTimer = setTimeout(() => {
+      banner.className=''; banner.style.display='none';
+      lastRouteStatus='idle';
+    }, 4000);
+  }
+}
+
+// ══════════════════════════════════════════════
+// ADAPTIVE POLL RATE
+// ══════════════════════════════════════════════
+let _pollTimer = null;
+let _pollInterval = 2000;
+
+function setPollInterval(ms) {
+  if(_pollInterval === ms) return;
+  _pollInterval = ms;
+  clearInterval(_pollTimer);
+  _pollTimer = setInterval(pollState, ms);
+}
+
+// ══════════════════════════════════════════════
+// BUTTON LOADING STATE
+// ══════════════════════════════════════════════
+function btnLoading(id, label) {
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.disabled = true;
+  el._origText = el.textContent;
+  el.innerHTML = `<span class="btn-spin"></span>${label||''}`;
+}
+function btnDone(id, text) {
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.disabled = false;
+  el.innerHTML = text || el._origText || el.textContent;
+}
+function allGotoBtnsLoading() {
+  ['btn-walk','btn-drive','m-btn-walk','m-btn-drive'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el){ el.disabled=true; }
+  });
+}
+function allGotoBtnsDone() {
+  const labels = {walk:'WALK',drive:'DRIVE','m-btn-walk':'WALK','m-btn-drive':'DRIVE'};
+  ['btn-walk','btn-drive','m-btn-walk','m-btn-drive'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el){ el.disabled=false; el.innerHTML=labels[id.replace('btn-','')]||'GO'; }
   });
 }
 
-let marker = null, routeLine = null, clickMarker = null;
-let isSpoofing = false;
-let savedLocs = {};
-
-function setMarker(lat, lon) {
-  if (!marker) {
-    marker = L.marker([lat, lon], {icon: mkIcon(isSpoofing)}).addTo(map);
-    map.setView([lat, lon], 14);
-  } else {
-    marker.setLatLng([lat, lon]);
-    marker.setIcon(mkIcon(isSpoofing));
-  }
-}
-function drawRoute(route) {
-  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
-  if (!route || route.length < 2) return;
-  routeLine = L.polyline(route.map(p=>[p[0],p[1]]), {color:'#f0b944',weight:2.5,opacity:0.85,dashArray:'8,5'}).addTo(map);
-}
-
-map.on('click', function(e) {
-  if (clickMarker) map.removeLayer(clickMarker);
-  clickMarker = L.circleMarker([e.latlng.lat, e.latlng.lng], {
-    radius:10, color:'#f0b944', fillColor:'#f0b944', fillOpacity:0.15, weight:1.5, dashArray:'4,3'
-  }).addTo(map);
-  setCoords(e.latlng.lat, e.latlng.lng);
-  if (window.innerWidth <= 700) { switchMobileTab('goto'); openSheet(); }
-});
-
-function setCoords(lat, lon) {
-  ['dest-lat','m-dest-lat'].forEach(id => { const el=document.getElementById(id); if(el) el.value=lat.toFixed(6); });
-  ['dest-lon','m-dest-lon'].forEach(id => { const el=document.getElementById(id); if(el) el.value=lon.toFixed(6); });
-}
-
-// ── LOGIN ──
+// ══════════════════════════════════════════════
+// LOGIN / LOGOUT
+// ══════════════════════════════════════════════
 async function doLogin() {
   const btn = document.getElementById('login-btn');
   const err = document.getElementById('login-error');
-  btn.disabled = true; btn.textContent = 'AUTHENTICATING...';
-  err.textContent = '';
+  btn.disabled=true;
+  btn.innerHTML='<span class="btn-spin"></span> AUTHENTICATING…';
+  err.textContent='';
   try {
-    const r = await fetch('/api/login', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        email: document.getElementById('login-email').value,
-        password: document.getElementById('login-password').value
-      })
-    });
+    const r    = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:document.getElementById('login-email').value,password:document.getElementById('login-password').value})});
     const data = await r.json();
-    if (data.ok) {
+    if(data.ok) {
       document.getElementById('login-overlay').classList.add('hidden');
+      toast('System online','ok');
     } else {
-      err.textContent = '// '+(data.error||'AUTH FAILED');
-      btn.disabled = false; btn.textContent = 'Initialize System';
+      err.textContent='// '+(data.error||'AUTH FAILED');
+      btn.disabled=false; btn.innerHTML='Initialize System';
     }
   } catch(e) {
-    err.textContent = '// NETWORK ERROR';
-    btn.disabled = false; btn.textContent = 'Initialize System';
+    err.textContent='// NETWORK ERROR';
+    btn.disabled=false; btn.innerHTML='Initialize System';
   }
 }
 
 async function doLogout() {
-  await fetch('/api/logout', {method:'POST'});
+  await fetch('/api/logout',{method:'POST'});
   document.getElementById('login-overlay').classList.remove('hidden');
-  document.getElementById('login-email').value = '';
-  document.getElementById('login-password').value = '';
-  document.getElementById('login-btn').disabled = false;
-  document.getElementById('login-btn').textContent = 'Initialize System';
-  if (marker) { map.removeLayer(marker); marker = null; }
-  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  document.getElementById('login-email').value='';
+  document.getElementById('login-password').value='';
+  document.getElementById('login-btn').disabled=false;
+  document.getElementById('login-btn').innerHTML='Initialize System';
+  if(marker){map.removeLayer(marker);marker=null;}
+  if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+  updateBanner('idle');
 }
 
-document.getElementById('login-email').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('login-password').focus(); });
-document.getElementById('login-password').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+document.getElementById('login-email').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('login-password').focus();});
+document.getElementById('login-password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
-// ── STATE POLL ──
-function tx(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
-function txc(id, val, cls) { const el=document.getElementById(id); if(el){el.textContent=val; el.className=cls;} }
+// ══════════════════════════════════════════════
+// STATE POLL
+// ══════════════════════════════════════════════
+function tx(id,v){const el=document.getElementById(id);if(el)el.textContent=v;}
+function txc(id,v,c){const el=document.getElementById(id);if(el){el.textContent=v;el.className=c;}}
 
-function renderProgressBar(p, t) {
-  const el = document.getElementById('s-route-bar');
-  if (!el) return;
-  const segs = Math.min(t, 20);
-  const filled = t > 0 ? Math.round((p/t)*segs) : 0;
-  el.innerHTML = Array.from({length:segs},(_,i)=>`<div class="hud-seg ${i<filled?'filled':''}"></div>`).join('');
+function renderProgressBar(p,t) {
+  const el=document.getElementById('s-route-bar'); if(!el)return;
+  const segs=Math.min(t,20), filled=t>0?Math.round((p/t)*segs):0;
+  el.innerHTML=Array.from({length:segs},(_,i)=>`<div class="hud-seg ${i<filled?'filled':''}"></div>`).join('');
 }
 
 function renderLog(log) {
-  const html = log.slice(-60).map(l => {
-    const m = l.match(/^\[(\d+:\d+:\d+)\]\s(.+)$/);
-    return m ? `<div class="log-e"><span class="log-t">${m[1]}</span><span class="log-m">${m[2]}</span></div>`
-             : `<div class="log-e"><span class="log-m">${l}</span></div>`;
+  const html=log.slice(-60).map(l=>{
+    const m=l.match(/^\[(\d+:\d+:\d+)\]\s(.+)$/);
+    return m?`<div class="log-e"><span class="log-t">${m[1]}</span><span class="log-m">${m[2]}</span></div>`
+            :`<div class="log-e"><span class="log-m">${l}</span></div>`;
   }).join('');
-  ['log-box','log-box-m'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const atBot = el.scrollHeight - el.scrollTop <= el.clientHeight + 20;
-    el.innerHTML = html;
-    if (atBot) el.scrollTop = el.scrollHeight;
+  ['log-box','log-box-m'].forEach(id=>{
+    const el=document.getElementById(id); if(!el)return;
+    const atBot=el.scrollHeight-el.scrollTop<=el.clientHeight+20;
+    el.innerHTML=html;
+    if(atBot)el.scrollTop=el.scrollHeight;
   });
 }
 
 function renderLocations(locs) {
-  if (JSON.stringify(locs) === JSON.stringify(savedLocs)) return;
-  savedLocs = locs;
-  const html = Object.entries(locs).map(([key,loc]) => `
+  if(JSON.stringify(locs)===JSON.stringify(savedLocs))return;
+  savedLocs=locs;
+  const html=Object.entries(locs).map(([key,loc])=>`
     <div class="loc-item">
       <div style="flex:1;min-width:0">
         <div class="loc-name">${(loc.name||key).substring(0,16)}</div>
@@ -648,7 +620,7 @@ function renderLocations(locs) {
         <button class="loc-btn del" onclick="deleteLoc('${key}')">✕</button>
       </div>
     </div>`).join('');
-  ['locations-list','m-locations-list'].forEach(id => { const el=document.getElementById(id); if(el) el.innerHTML=html; });
+  ['locations-list','m-locations-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=html;});
 }
 
 async function pollState() {
@@ -656,150 +628,197 @@ async function pollState() {
     const r = await fetch('/api/state');
     const s = await r.json();
 
-    if (!s.logged_in) {
-      document.getElementById('login-overlay').classList.remove('hidden');
-      return;
-    }
+    if(!s.logged_in){document.getElementById('login-overlay').classList.remove('hidden');return;}
     document.getElementById('login-overlay').classList.add('hidden');
 
-    isSpoofing = s.spoofing;
-    if (s.lat !== null) { setMarker(s.lat, s.lon); tx('s-lat', s.lat.toFixed(6)); tx('s-lon', s.lon.toFixed(6)); }
+    isSpoofing=s.spoofing;
+    if(s.lat!==null){setMarker(s.lat,s.lon);tx('s-lat',s.lat.toFixed(6));tx('s-lon',s.lon.toFixed(6));}
 
-    const hdg = String(Math.round(s.heading)).padStart(3,'0');
-    const spd = (s.speed * 3.6).toFixed(1);
-    tx('s-hdg', hdg+'°'); tx('s-spd', spd+' km/h'); tx('hud-hdg', hdg); tx('hud-spd', spd); tx('hud-mode', s.mode.toUpperCase());
+    const hdg=String(Math.round(s.heading)).padStart(3,'0');
+    const spd=(s.speed*3.6).toFixed(1);
+    tx('s-hdg',hdg+'°');tx('s-spd',spd+' km/h');tx('hud-hdg',hdg);tx('hud-spd',spd);tx('hud-mode',s.mode.toUpperCase());
 
-    txc('s-home', s.near_home ? 'CONFIRMED' : 'NEGATIVE', 'stat-v '+(s.near_home?'good':''));
-    const pct = Math.round(s.battery * 100);
-    txc('s-bat-pct', pct+'%', 'stat-v '+(pct>50?'good':pct>20?'warn':'bad'));
-    txc('s-charging', s.charging?'CHARGING':'DISCHARGING', 'stat-v '+(s.charging?'good':'warn'));
-    const bb = document.getElementById('s-bat-bar');
-    if (bb) { bb.style.width=pct+'%'; bb.style.background=pct>50?'#3dbde8':pct>20?'#f0b944':'#e74c3c'; }
+    txc('s-home',s.near_home?'CONFIRMED':'NEGATIVE','stat-v '+(s.near_home?'good':''));
+    const pct=Math.round(s.battery*100);
+    txc('s-bat-pct',pct+'%','stat-v '+(pct>50?'good':pct>20?'warn':'bad'));
+    txc('s-charging',s.charging?'CHARGING':'DISCHARGING','stat-v '+(s.charging?'good':'warn'));
+    const bb=document.getElementById('s-bat-bar');
+    if(bb){bb.style.width=pct+'%';bb.style.background=pct>50?'#3dbde8':pct>20?'#f0b944':'#e74c3c';}
 
-    ['still','walking','driving'].forEach(m => { const el=document.getElementById('mode-'+m); if(el) el.classList.toggle('active', s.mode===m); });
-    tx('s-route', s.route_total>0?`${s.route_progress} / ${s.route_total}`:'-- / --');
-    renderProgressBar(s.route_progress, s.route_total);
+    ['still','walking','driving'].forEach(m=>{const el=document.getElementById('mode-'+m);if(el)el.classList.toggle('active',s.mode===m);});
+    tx('s-route',s.route_total>0?`${s.route_progress} / ${s.route_total}`:'-- / --');
+    renderProgressBar(s.route_progress,s.route_total);
 
-    const badge = document.getElementById('spoof-badge');
-    const hBtn  = document.getElementById('hdr-toggle');
-    const fab   = document.getElementById('fab-toggle');
-    if (s.spoofing) {
-      if (badge) { badge.className='spoof-badge badge-on'; document.getElementById('badge-text').textContent='ACTIVE'; }
-      if (hBtn) { hBtn.className='btn btn-red'; hBtn.textContent='DISENGAGE'; }
-      if (fab) { fab.className='fab fab-on'; fab.textContent='◈ DISENGAGE'; }
+    // spoof badge
+    const badge=document.getElementById('spoof-badge');
+    const hBtn=document.getElementById('hdr-toggle');
+    const fab=document.getElementById('fab-toggle');
+    if(s.spoofing){
+      if(badge){badge.className='spoof-badge badge-on';document.getElementById('badge-text').textContent='ACTIVE';}
+      if(hBtn){hBtn.className='btn btn-red';hBtn.textContent='DISENGAGE';}
+      if(fab){fab.className='fab fab-on';fab.textContent='◈ DISENGAGE';}
     } else {
-      if (badge) { badge.className='spoof-badge badge-off'; document.getElementById('badge-text').textContent='OFFLINE'; }
-      if (hBtn) { hBtn.className='btn btn-gold'; hBtn.textContent='ENGAGE'; }
-      if (fab) { fab.className='fab fab-off'; fab.textContent='◈ ENGAGE'; }
+      if(badge){badge.className='spoof-badge badge-off';document.getElementById('badge-text').textContent='OFFLINE';}
+      if(hBtn){hBtn.className='btn btn-gold';hBtn.textContent='ENGAGE';}
+      if(fab){fab.className='fab fab-off';fab.textContent='◈ ENGAGE';}
+    }
+
+    // route status → banner + draw route when it arrives
+    const rs = s.route_status || 'idle';
+    const rm = s.route_status_msg || '';
+    updateBanner(rs, rm);
+
+    if(rs === 'ready' && s.route) {
+      drawRoute(s.route);
+      allGotoBtnsDone();
+      toast(`Route ready · ${s.route.length} pts`, 'ok', 2500);
+    } else if(rs === 'error') {
+      allGotoBtnsDone();
+      toast('Routing failed — check log', 'err', 4000);
     }
 
     renderLocations(s.saved_locations);
     renderLog(s.log);
   } catch(e) {}
 }
-setInterval(pollState, 2000);
+
+_pollTimer = setInterval(pollState, _pollInterval);
 pollState();
 
-// ── ACTIONS ──
-async function toggleSpoofing() { await fetch('/api/toggle',{method:'POST'}); pollState(); }
-async function stillBtn() { await fetch('/api/still',{method:'POST'}); if(routeLine){map.removeLayer(routeLine);routeLine=null;} pollState(); }
-
-function getCoords() {
-  let lat = parseFloat(document.getElementById('dest-lat')?.value);
-  let lon = parseFloat(document.getElementById('dest-lon')?.value);
-  if (isNaN(lat)) { const a=document.getElementById('m-dest-lat'),b=document.getElementById('m-dest-lon'); if(a)lat=parseFloat(a.value); if(b)lon=parseFloat(b.value); }
-  return {lat, lon};
-}
-async function goTo(mode) {
-  const {lat,lon} = getCoords();
-  if (isNaN(lat)||isNaN(lon)) return;
-  const r = await fetch('/api/goto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon,mode})});
-  const d = await r.json();
-  if (d.route) drawRoute(d.route);
-  pollState(); collapseSheet();
-}
-async function teleportTo() {
-  const {lat,lon} = getCoords();
-  if (isNaN(lat)||isNaN(lon)) return;
-  await fetch('/api/teleport',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon})});
-  if (routeLine){map.removeLayer(routeLine);routeLine=null;}
-  pollState(); collapseSheet();
-}
-async function walkTo(lat,lon) { const r=await fetch('/api/goto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon,mode:'walking'})}); const d=await r.json(); if(d.route)drawRoute(d.route); pollState(); collapseSheet(); }
-async function driveTo(lat,lon) { const r=await fetch('/api/goto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon,mode:'driving'})}); const d=await r.json(); if(d.route)drawRoute(d.route); pollState(); collapseSheet(); }
-async function jumpTo(lat,lon) { await fetch('/api/teleport',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon})}); if(routeLine){map.removeLayer(routeLine);routeLine=null;} pollState(); collapseSheet(); }
-async function deleteLoc(key) { await fetch('/api/delete_location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:key})}); pollState(); }
-
-async function saveCurrentLocation() {
-  const ids = ['new-loc-name','m-new-loc-name'];
-  let name = '';
-  for (const id of ids) { const el=document.getElementById(id); if(el&&el.value.trim()){name=el.value.trim();break;} }
-  if (!name) return;
-  const lat=parseFloat(document.getElementById('s-lat').textContent);
-  const lon=parseFloat(document.getElementById('s-lon').textContent);
-  if (isNaN(lat)) return;
-  await fetch('/api/save_location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,lat,lon})});
-  ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+// ══════════════════════════════════════════════
+// ACTIONS
+// ══════════════════════════════════════════════
+async function toggleSpoofing(){await fetch('/api/toggle',{method:'POST'});pollState();}
+async function stillBtn(){
+  await fetch('/api/still',{method:'POST'});
+  if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+  updateBanner('idle');
+  allGotoBtnsDone();
   pollState();
 }
 
-// ── SETTINGS ──
-async function loadSettings() {
-  try {
-    const r = await fetch('/api/config');
-    if (!r.ok) return;
-    const cfg = await r.json();
+function getCoords(){
+  let lat=parseFloat(document.getElementById('dest-lat')?.value);
+  let lon=parseFloat(document.getElementById('dest-lon')?.value);
+  if(isNaN(lat)){const a=document.getElementById('m-dest-lat'),b=document.getElementById('m-dest-lon');if(a)lat=parseFloat(a.value);if(b)lon=parseFloat(b.value);}
+  return{lat,lon};
+}
+
+async function goTo(mode) {
+  const{lat,lon}=getCoords();
+  if(isNaN(lat)||isNaN(lon)){toast('Set a destination first','warn');return;}
+  allGotoBtnsLoading();
+  updateBanner('calculating',`Calculating ${mode} route…`);
+  await fetch('/api/goto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon,mode})});
+  setPollInterval(400);   // fast poll until route arrives
+  collapseSheet();
+}
+
+async function teleportTo(){
+  const{lat,lon}=getCoords();
+  if(isNaN(lat)||isNaN(lon)){toast('Set a destination first','warn');return;}
+  btnLoading('btn-teleport','');
+  await fetch('/api/teleport',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon})});
+  if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+  btnDone('btn-teleport','◈ TELEPORT');
+  toast('Teleported','info',1800);
+  pollState();collapseSheet();
+}
+
+async function walkTo(lat,lon){
+  allGotoBtnsLoading();updateBanner('calculating','Calculating walk route…');
+  await fetch('/api/goto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon,mode:'walking'})});
+  setPollInterval(400);collapseSheet();
+}
+async function driveTo(lat,lon){
+  allGotoBtnsLoading();updateBanner('calculating','Calculating drive route…');
+  await fetch('/api/goto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon,mode:'driving'})});
+  setPollInterval(400);collapseSheet();
+}
+async function jumpTo(lat,lon){
+  await fetch('/api/teleport',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat,lon})});
+  if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+  toast('Teleported','info',1800);pollState();collapseSheet();
+}
+async function deleteLoc(key){
+  await fetch('/api/delete_location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:key})});
+  pollState();
+}
+
+async function saveCurrentLocation(){
+  const ids=['new-loc-name','m-new-loc-name'];
+  let name='';
+  for(const id of ids){const el=document.getElementById(id);if(el&&el.value.trim()){name=el.value.trim();break;}}
+  if(!name)return;
+  const lat=parseFloat(document.getElementById('s-lat').textContent);
+  const lon=parseFloat(document.getElementById('s-lon').textContent);
+  if(isNaN(lat)){toast('No position yet','warn');return;}
+  await fetch('/api/save_location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,lat,lon})});
+  ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  toast(`Saved "${name}"`, 'ok', 2000);
+  pollState();
+}
+
+// ══════════════════════════════════════════════
+// SETTINGS
+// ══════════════════════════════════════════════
+async function loadSettings(){
+  try{
+    const r=await fetch('/api/config');if(!r.ok)return;
+    const cfg=await r.json();
     ['cfg-home','m-cfg-home'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=cfg.home_location||'';});
     ['cfg-radius','m-cfg-radius'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=cfg.home_radius_m||200;});
     ['cfg-loc-jwt','m-cfg-loc-jwt'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=cfg.location_jwt||'';});
-  } catch(e) {}
+  }catch(e){}
 }
-async function saveSettings() {
-  const get = (...ids) => { for(const id of ids){const el=document.getElementById(id);if(el&&el.value)return el.value;} return ''; };
+async function saveSettings(){
+  const get=(...ids)=>{for(const id of ids){const el=document.getElementById(id);if(el&&el.value)return el.value;}return '';};
   await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    home_location: get('cfg-home','m-cfg-home'),
-    home_radius_m: parseInt(get('cfg-radius','m-cfg-radius'))||200,
-    location_jwt: get('cfg-loc-jwt','m-cfg-loc-jwt'),
+    home_location:get('cfg-home','m-cfg-home'),
+    home_radius_m:parseInt(get('cfg-radius','m-cfg-radius'))||200,
+    location_jwt:get('cfg-loc-jwt','m-cfg-loc-jwt'),
   })});
+  toast('Settings saved','ok',2000);
 }
 loadSettings();
 
-// ── DESKTOP TABS ──
-const DTABS = ['status','goto','waypts','cfg'];
-function switchTab(name) {
-  DTABS.forEach((n,i) => {
-    document.querySelectorAll('.sidebar-tabs .tab')[i]?.classList.toggle('active', n===name);
-    document.getElementById('tab-'+n)?.classList.toggle('active', n===name);
+// ══════════════════════════════════════════════
+// DESKTOP TABS
+// ══════════════════════════════════════════════
+const DTABS=['status','goto','waypts','cfg'];
+function switchTab(name){
+  DTABS.forEach((n,i)=>{
+    document.querySelectorAll('.sidebar-tabs .tab')[i]?.classList.toggle('active',n===name);
+    document.getElementById('tab-'+n)?.classList.toggle('active',n===name);
   });
-  if (name === 'cfg') loadSettings();
+  if(name==='cfg')loadSettings();
 }
 
-// ── MOBILE SHEET ──
-let sheetIsOpen = false;
-function openSheet() { sheetIsOpen=true; document.getElementById('mobile-sheet').classList.add('open'); }
-function collapseSheet() { sheetIsOpen=false; document.getElementById('mobile-sheet').classList.remove('open'); }
-document.getElementById('sheet-drag').addEventListener('click', () => sheetIsOpen ? collapseSheet() : openSheet());
+// ══════════════════════════════════════════════
+// MOBILE SHEET
+// ══════════════════════════════════════════════
+let sheetIsOpen=false;
+function openSheet(){sheetIsOpen=true;document.getElementById('mobile-sheet').classList.add('open');}
+function collapseSheet(){sheetIsOpen=false;document.getElementById('mobile-sheet').classList.remove('open');}
+document.getElementById('sheet-drag').addEventListener('click',()=>sheetIsOpen?collapseSheet():openSheet());
 
-const MTABS = {
-  goto: () => `
-    <div class="section">
-      <div class="sec-label">Target</div>
-      <div class="goto-wrap">
-        <div class="field-row"><div class="field-lbl">Latitude</div>
-          <input class="hud-input" type="number" id="m-dest-lat" placeholder="00.000000" step="0.0001" inputmode="decimal" value="${document.getElementById('dest-lat')?.value||''}"/></div>
-        <div class="field-row"><div class="field-lbl">Longitude</div>
-          <input class="hud-input" type="number" id="m-dest-lon" placeholder="00.000000" step="0.0001" inputmode="decimal" value="${document.getElementById('dest-lon')?.value||''}"/></div>
-        <p style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-muted);letter-spacing:1px;margin-bottom:10px;">
-          Tap the map to set target, or type coordinates
-        </p>
-        <div class="act-btns"><button class="btn btn-cyan" onclick="goTo('walking')">WALK</button><button class="btn btn-gold" onclick="goTo('driving')">DRIVE</button></div>
-        <button class="btn btn-ghost btn-full" style="margin-top:0" onclick="teleportTo()">◈ TELEPORT</button>
+const MTABS={
+  goto:()=>`
+    <div class="section"><div class="sec-label">Target</div><div class="goto-wrap">
+      <div class="field-row"><div class="field-lbl">Latitude</div>
+        <input class="hud-input" type="number" id="m-dest-lat" placeholder="00.000000" step="0.0001" inputmode="decimal" value="${document.getElementById('dest-lat')?.value||''}"/></div>
+      <div class="field-row"><div class="field-lbl">Longitude</div>
+        <input class="hud-input" type="number" id="m-dest-lon" placeholder="00.000000" step="0.0001" inputmode="decimal" value="${document.getElementById('dest-lon')?.value||''}"/></div>
+      <p style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-muted);letter-spacing:1px;margin-bottom:10px">Tap the map to set target, or type coords</p>
+      <div class="act-btns">
+        <button class="btn btn-cyan" id="m-btn-walk" onclick="goTo('walking')">WALK</button>
+        <button class="btn btn-gold" id="m-btn-drive" onclick="goTo('driving')">DRIVE</button>
       </div>
-    </div>`,
+      <button class="btn btn-ghost btn-full" onclick="teleportTo()">◈ TELEPORT</button>
+    </div></div>`,
 
-  status: () => `
-    <div class="section">
-      <div class="sec-label">Position</div>
+  status:()=>`
+    <div class="section"><div class="sec-label">Position</div>
       <div class="stat-row"><span class="stat-k">LAT</span><span class="stat-v">${document.getElementById('s-lat')?.textContent||'---'}</span></div>
       <div class="stat-row"><span class="stat-k">LON</span><span class="stat-v">${document.getElementById('s-lon')?.textContent||'---'}</span></div>
       <div class="stat-row"><span class="stat-k">HEADING</span><span class="stat-v">${document.getElementById('s-hdg')?.textContent||'---'}</span></div>
@@ -807,21 +826,16 @@ const MTABS = {
       <div class="stat-row"><span class="stat-k">CHARGE</span><span class="stat-v">${document.getElementById('s-bat-pct')?.textContent||'---'}</span></div>
       <div class="stat-row"><span class="stat-k">POWER</span><span class="stat-v">${document.getElementById('s-charging')?.textContent||'---'}</span></div>
     </div>
-    <div class="section">
-      <div class="sec-label">Travel Mode</div>
-      <div class="mode-btns">
-        <div class="mode-btn ${document.getElementById('mode-still')?.classList.contains('active')?'active':''}" onclick="stillBtn()"><span class="mi">◆</span>STATIC</div>
-        <div class="mode-btn ${document.getElementById('mode-walking')?.classList.contains('active')?'active':''}" onclick="mobileGoMode('walking')"><span class="mi">↑</span>WALK</div>
-        <div class="mode-btn ${document.getElementById('mode-driving')?.classList.contains('active')?'active':''}" onclick="mobileGoMode('driving')"><span class="mi">▶</span>DRIVE</div>
-      </div>
-    </div>`,
+    <div class="section"><div class="sec-label">Travel Mode</div><div class="mode-btns">
+      <div class="mode-btn ${document.getElementById('mode-still')?.classList.contains('active')?'active':''}" onclick="stillBtn()"><span class="mi">◆</span>STATIC</div>
+      <div class="mode-btn ${document.getElementById('mode-walking')?.classList.contains('active')?'active':''}" onclick="goTo('walking')"><span class="mi">↑</span>WALK</div>
+      <div class="mode-btn ${document.getElementById('mode-driving')?.classList.contains('active')?'active':''}" onclick="goTo('driving')"><span class="mi">▶</span>DRIVE</div>
+    </div></div>`,
 
-  waypts: () => `
-    <div class="section">
-      <div class="sec-label">Saved Waypoints</div>
+  waypts:()=>`
+    <div class="section"><div class="sec-label">Saved Waypoints</div>
       <div id="m-locations-list"></div>
-      <div style="margin-top:12px">
-        <div class="sec-label">Mark Current</div>
+      <div style="margin-top:12px"><div class="sec-label">Mark Current</div>
         <div style="display:flex;gap:6px">
           <input class="hud-input" type="text" id="m-new-loc-name" placeholder="WAYPOINT NAME" style="flex:1"/>
           <button class="btn btn-gold" onclick="saveCurrentLocation()">MARK</button>
@@ -829,43 +843,40 @@ const MTABS = {
       </div>
     </div>`,
 
-  cfg: () => `
-    <div class="section">
-      <div class="sec-label">Home Zone</div>
+  cfg:()=>`
+    <div class="section"><div class="sec-label">Home Zone</div>
       <div class="cfg-row"><div class="field-lbl">Base Location Key</div><input class="hud-input" type="text" id="m-cfg-home" placeholder="home"/></div>
       <div class="cfg-row"><div class="field-lbl">Perimeter Radius (m)</div><input class="hud-input" type="number" id="m-cfg-radius" placeholder="200" inputmode="numeric"/></div>
     </div>
-    <div class="section">
-      <div class="sec-label">Auth Override</div>
-      <div class="cfg-row"><div class="field-lbl">Location JWT (optional)</div><input class="hud-input" type="text" id="m-cfg-loc-jwt" placeholder="eyJ..."/></div>
+    <div class="section"><div class="sec-label">Auth Override</div>
+      <div class="cfg-row"><div class="field-lbl">Location JWT (optional)</div><input class="hud-input" type="text" id="m-cfg-loc-jwt" placeholder="eyJ…"/></div>
     </div>
     <button class="btn btn-gold btn-full" onclick="saveSettings()">COMMIT CHANGES</button>
     <div style="margin-top:10px"><button class="btn btn-ghost btn-full" onclick="doLogout()">TERMINATE SESSION</button></div>`,
 };
 
-function mobileGoMode(mode) { const {lat,lon} = getCoords(); if (!isNaN(lat) && !isNaN(lon)) goTo(mode); }
-
-function switchMobileTab(name) {
-  document.querySelectorAll('.sheet-tab').forEach((t,i) => {
-    const names = ['goto','status','waypts','cfg'];
-    t.classList.toggle('active', names[i]===name);
+function switchMobileTab(name){
+  document.querySelectorAll('.sheet-tab').forEach((t,i)=>{
+    const names=['goto','status','waypts','cfg'];
+    t.classList.toggle('active',names[i]===name);
   });
-  const body = document.getElementById('sheet-body');
-  body.innerHTML = (MTABS[name]||MTABS.goto)();
-  if (name==='waypts') renderLocations(savedLocs);
-  if (name==='cfg') loadSettings();
+  document.getElementById('sheet-body').innerHTML=(MTABS[name]||MTABS.goto)();
+  if(name==='waypts')renderLocations(savedLocs);
+  if(name==='cfg')loadSettings();
 }
 switchMobileTab('goto');
 
-// ── MOBILE TOUCH DRAG ──
-let touchStartY = 0;
-const sheet = document.getElementById('mobile-sheet');
-sheet.addEventListener('touchstart', e => { touchStartY = e.touches[0].clientY; }, {passive:true});
-sheet.addEventListener('touchend', e => {
-  const dy = e.changedTouches[0].clientY - touchStartY;
-  if (dy > 60) collapseSheet();
-  if (dy < -60) openSheet();
-}, {passive:true});
+// ══════════════════════════════════════════════
+// MOBILE TOUCH DRAG
+// ══════════════════════════════════════════════
+let touchStartY=0;
+const sheet=document.getElementById('mobile-sheet');
+sheet.addEventListener('touchstart',e=>{touchStartY=e.touches[0].clientY;},{passive:true});
+sheet.addEventListener('touchend',e=>{
+  const dy=e.changedTouches[0].clientY-touchStartY;
+  if(dy>60)collapseSheet();
+  if(dy<-60)openSheet();
+},{passive:true});
 </script>
 </body>
 </html>
